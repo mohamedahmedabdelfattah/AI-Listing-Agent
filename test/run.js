@@ -9,6 +9,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import os from 'node:os';
@@ -326,10 +327,10 @@ const { transcribeAudio } = await import(
 // network-tools.js references chrome.* inside a try/catch at module load, so
 // it imports cleanly under Node — the storage init silently no-ops and
 // validateFetchUrl / registrableDomain are pure functions.
-const { validateFetchUrl, registrableDomain, filenameFromContentDisposition: filenameFromContentDispositionCh, fetchUrl: fetchUrlCh, researchUrl: researchUrlCh, downloadFiles: downloadFilesCh, executeHttpSkillTool: executeHttpSkillToolCh } = await import(
+const { validateFetchUrl, registrableDomain, filenameFromContentDisposition: filenameFromContentDispositionCh, fetchUrl: fetchUrlCh, researchUrl: researchUrlCh, downloadFiles: downloadFilesCh, downloadResourceFromPage: downloadResourceFromPageCh, executeHttpSkillTool: executeHttpSkillToolCh } = await import(
   'file://' + path.join(ROOT, 'src/chrome/src/network/network-tools.js').replace(/\\/g, '/')
 );
-const { validateFetchUrl: validateFetchUrlFx, registrableDomain: registrableDomainFx, filenameFromContentDisposition: filenameFromContentDispositionFx, fetchUrl: fetchUrlFx, readPageSource: readPageSourceFx, researchUrl: researchUrlFx, downloadFiles: downloadFilesFx, executeHttpSkillTool: executeHttpSkillToolFx } = await import(
+const { validateFetchUrl: validateFetchUrlFx, registrableDomain: registrableDomainFx, filenameFromContentDisposition: filenameFromContentDispositionFx, fetchUrl: fetchUrlFx, readPageSource: readPageSourceFx, researchUrl: researchUrlFx, downloadFiles: downloadFilesFx, downloadResourceFromPage: downloadResourceFromPageFx, executeHttpSkillTool: executeHttpSkillToolFx } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/network/network-tools.js').replace(/\\/g, '/')
 );
 const { firefoxRestrictedDomainForUrl, firefoxRestrictedDomainFailure, firefoxHostPermissionFailure } = await import(
@@ -448,6 +449,8 @@ const {
   PLANNER_API_REPLAY_RULE,
   PLANNER_RESPONSE_ONLY_RULES,
   READ_SCOPE_SYSTEM_PROMPT,
+  PLANNER_RESPONSE_JSON_SCHEMA,
+  PLANNER_INTENT_RESPONSE_JSON_SCHEMA,
   buildPlannerSystemPrompt,
   buildPlannerIntentMessages,
   buildReadScopeMessages,
@@ -467,6 +470,8 @@ const {
   PLANNER_API_REPLAY_RULE: PLANNER_API_REPLAY_RULE_FX,
   PLANNER_RESPONSE_ONLY_RULES: PLANNER_RESPONSE_ONLY_RULES_FX,
   READ_SCOPE_SYSTEM_PROMPT: READ_SCOPE_SYSTEM_PROMPT_FX,
+  PLANNER_RESPONSE_JSON_SCHEMA: PLANNER_RESPONSE_JSON_SCHEMA_FX,
+  PLANNER_INTENT_RESPONSE_JSON_SCHEMA: PLANNER_INTENT_RESPONSE_JSON_SCHEMA_FX,
   buildPlannerSystemPrompt: buildPlannerSystemPromptFx,
   buildPlannerMessages: buildPlannerMessagesFx,
   buildPlannerIntentMessages: buildPlannerIntentMessagesFx,
@@ -490,21 +495,25 @@ const { historyTextFromElement: historyTextFromElementFx } = await import(
 );
 const {
   CONTEXT_MENU_CLAIM_LEASE_MS: CONTEXT_MENU_CLAIM_LEASE_MS_CH,
+  SELECTION_CONTEXT_SOURCE_GROUNDING: SELECTION_CONTEXT_SOURCE_GROUNDING_CH,
   SELECTION_ONLY_SOURCE_GROUNDING: SELECTION_ONLY_SOURCE_GROUNDING_CH,
   buildContextMenuPrompt: buildContextMenuPromptCh,
   buildSelectionPrompt: buildSelectionPromptCh,
   createContextMenuStorage: createContextMenuStorageCh,
   formatSelectionPromptForDisplay: formatSelectionPromptForDisplayCh,
+  normalizeSelectionSourceGrounding: normalizeSelectionSourceGroundingCh,
 } = await import(
   'file://' + path.join(ROOT, 'src/chrome/src/context-menu-storage.js').replace(/\\/g, '/')
 );
 const {
   CONTEXT_MENU_CLAIM_LEASE_MS: CONTEXT_MENU_CLAIM_LEASE_MS_FX,
+  SELECTION_CONTEXT_SOURCE_GROUNDING: SELECTION_CONTEXT_SOURCE_GROUNDING_FX,
   SELECTION_ONLY_SOURCE_GROUNDING: SELECTION_ONLY_SOURCE_GROUNDING_FX,
   buildContextMenuPrompt: buildContextMenuPromptFx,
   buildSelectionPrompt: buildSelectionPromptFx,
   createContextMenuStorage: createContextMenuStorageFx,
   formatSelectionPromptForDisplay: formatSelectionPromptForDisplayFx,
+  normalizeSelectionSourceGrounding: normalizeSelectionSourceGroundingFx,
 } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/context-menu-storage.js').replace(/\\/g, '/')
 );
@@ -741,6 +750,7 @@ const {
 const {
   assertMatchingArchiveVersion,
   assertStoreSafeFlagLicenseEntries,
+  assertStoreReviewableJavaScript,
   listZipEntryNames,
 } = await import(
   'file://' + path.join(ROOT, 'scripts/build-zip.mjs').replace(/\\/g, '/')
@@ -5912,6 +5922,7 @@ test('accessibility-tree schema and prompts preserve exact whole-document contin
   const chromeSource = fs.readFileSync(path.join(ROOT, 'src/chrome/src/content/accessibility-tree.js'), 'utf8');
   const firefoxSource = fs.readFileSync(path.join(ROOT, 'src/firefox/src/content/accessibility-tree.js'), 'utf8');
   assert.equal(chromeSource, firefoxSource, 'Chrome/Firefox accessibility paging drifted');
+  assert.match(chromeSource, /const continuationBase = \{[\s\S]*?\.\.\.\(refId \? \{ ref_id: refId \} : \{\}\),[\s\S]*?\};/, 'anchored tree continuationArgs drop the subtree ref_id');
   assert.match(chromeSource, /conversationExpansionState/, 'Gmail expansion evidence is not returned as structured metadata');
   assert.match(chromeSource, /closest\('\[role="listitem"\],\[role="article"\],\.adn,\.ads'\)/, 'message-body controls can spoof Gmail expansion evidence');
 
@@ -8082,6 +8093,43 @@ test('accessibility-tree nextPage pagination past the read cap is not suspicious
   d._checkAccessibilityReadLoop(tab, 'click_ax', { ref_id: 'ref_15' }, { success: true });
   assert.equal(d.axReadStates.has(tab), false);
   assert.equal(d._checkAccessibilityReadLoop(tab, 'get_accessibility_tree', { ref_id: 'ref_9' }, { pageContent: 'generic [ref_9]' }).kind, 'none');
+});
+
+test('accessibility-tree anchored nextPage pagination stays within one safe subtree scope', () => {
+  const d = new ConfiguredLoopDetector();
+  const tab = 24;
+  for (let page = 1; page <= 2; page++) {
+    const rootScope = { filter: 'visible', maxDepth: 12, maxChars: 3000 };
+    assert.equal(d._checkAccessibilityReadLoop(
+      tab,
+      'get_accessibility_tree',
+      { ...rootScope, ...(page > 1 ? { page } : {}) },
+      {
+        pageContent: `visible root page ${page}`,
+        nextPage: page + 1,
+        continuationArgs: { ...rootScope, page: page + 1 },
+      },
+    ).kind, 'none');
+  }
+  const scope = {
+    filter: 'all',
+    maxDepth: 15,
+    maxChars: 12000,
+    ref_id: 'ref_main',
+  };
+  for (let page = 1; page <= 15; page++) {
+    const result = d._checkAccessibilityReadLoop(
+      tab,
+      'get_accessibility_tree',
+      { ...scope, ...(page > 1 ? { page } : {}) },
+      {
+        pageContent: `main page ${page} [ref_main]`,
+        nextPage: page + 1,
+        continuationArgs: { ...scope, page: page + 1 },
+      },
+    );
+    assert.equal(result.kind, 'none', `exact anchored continuation page ${page} was treated as ref enumeration`);
+  }
 });
 
 test('accessibility-tree read cap still stops a non-sequential read after long pagination', () => {
@@ -12016,6 +12064,80 @@ test('build-zip rejects filenames that would disagree with archived manifests', 
     () => assertMatchingArchiveVersion('23.0.0', '22.4.5', 'Chrome manifest'),
     /Chrome manifest is 22\.4\.5, but the release package version is 23\.0\.0/
   );
+});
+
+test('build-zip rejects store-obscuring JavaScript constructions', () => {
+  assert.doesNotThrow(() => assertStoreReviewableJavaScript(
+    "return '<script>' + content + '</script>';\nconst scheme = 'javascript:';",
+    'transparent fixture',
+  ));
+  assert.throws(
+    () => assertStoreReviewableJavaScript(
+      "return LT + SCRIPT + GT + content + LT + '/' + SCRIPT + GT;",
+      'split tag fixture',
+    ),
+    /split tag fixture contains split PDF\.js <script> construction/,
+  );
+  assert.throws(
+    () => assertStoreReviewableJavaScript(
+      `const probe = 'data:image/png;base64,${'A'.repeat(128)}';`,
+      'inline image fixture',
+    ),
+    /inline image fixture contains long inline base64 media payload/,
+  );
+});
+
+test('vendored PDF.js and multimodal probes remain store-reviewable in both builds', () => {
+  const pdfFiles = ['pdf.mjs', 'pdf.worker.mjs'];
+  for (const browser of ['chrome', 'firefox']) {
+    for (const filename of pdfFiles) {
+      const relativePath = `src/${browser}/vendor/pdfjs/${filename}`;
+      const source = fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
+      assert.doesNotThrow(() => assertStoreReviewableJavaScript(source, relativePath));
+      assert.match(source, /return '<script>' \+ content \+ '<\/script>';/);
+      assert.match(source, /var JS = 'javascript:';/);
+    }
+
+    const managerPath = `src/${browser}/src/providers/manager.js`;
+    const manager = fs.readFileSync(path.join(ROOT, managerPath), 'utf8');
+    assert.doesNotThrow(() => assertStoreReviewableJavaScript(manager, managerPath));
+    assert.doesNotMatch(manager, /VISION_CONNECTION_TEST_IMAGE\s*=\s*['"]data:/);
+    assert.doesNotMatch(manager, /function silentWavBlob\s*\(/);
+  }
+
+  for (const filename of pdfFiles) {
+    assert.equal(
+      fs.readFileSync(path.join(ROOT, 'src/chrome/vendor/pdfjs', filename), 'utf8'),
+      fs.readFileSync(path.join(ROOT, 'src/firefox/vendor/pdfjs', filename), 'utf8'),
+      `${filename} must remain byte-identical across browser packages`,
+    );
+  }
+});
+
+test('multimodal connection-test assets preserve the prior image and silent WAV bytes', () => {
+  const expectedHashes = {
+    'vision-connection-test.png': '514fd28946340ea4e7e7bb7817d876ef1679456c635fbf3afc1b978031e30482',
+    'transcription-connection-test.wav': '56d4af65701c26df20bd4021eda95b6e830348ce3a746086079fe89285548dc9',
+  };
+  for (const [filename, expectedHash] of Object.entries(expectedHashes)) {
+    const chromeAsset = fs.readFileSync(path.join(ROOT, 'src/chrome/assets', filename));
+    const firefoxAsset = fs.readFileSync(path.join(ROOT, 'src/firefox/assets', filename));
+    assert.deepEqual(firefoxAsset, chromeAsset, `${filename} differs between browser packages`);
+    assert.equal(createHash('sha256').update(chromeAsset).digest('hex'), expectedHash);
+  }
+
+  const png = fs.readFileSync(path.join(ROOT, 'src/chrome/assets/vision-connection-test.png'));
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(png.readUInt32BE(16), 96);
+  assert.equal(png.readUInt32BE(20), 48);
+
+  const wav = fs.readFileSync(path.join(ROOT, 'src/chrome/assets/transcription-connection-test.wav'));
+  assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
+  assert.equal(wav.readUInt16LE(22), 1, 'WAV must remain mono');
+  assert.equal(wav.readUInt32LE(24), 8000, 'WAV sample rate changed');
+  assert.equal(wav.readUInt16LE(34), 16, 'WAV sample width changed');
+  assert.ok(wav.subarray(44).every(byte => byte === 0), 'WAV probe must remain silent');
 });
 
 test('tracked store archives contain the Opera-safe flag license filename', () => {
@@ -20144,6 +20266,8 @@ test('all locales translate the new-conversation and selected-text scope UI', as
         'sp.clear.action_warning',
         'sp.selection_scope.title',
         'sp.selection_scope.description',
+        'sp.selection_scope.context_title',
+        'sp.selection_scope.context_description',
         'sp.input.selection_placeholder',
       ]) {
         assert.equal(typeof locale[key], 'string', `${label}/${filename}: missing ${key}`);
@@ -20854,8 +20978,8 @@ test('selected-text scope is a durable visible sidepanel state with a New conver
     const narrowBannerRuleIndex = css.indexOf('.selection-scope-banner {', baseBannerRuleIndex + 1);
     assert.ok(baseBannerRuleIndex >= 0 && narrowBannerRuleIndex > baseBannerRuleIndex, `${label}: narrow selected-text layout should follow and override the base banner grid`);
 
-    assert.match(panel, /const selectionGroundedTabs = new Set\(\);/, `${label}: selected-text state should be isolated per tab`);
-    assert.match(panel, /function applyConversationScopeState\(tabId, state\) \{[\s\S]*?hasOwnProperty\.call\(state, 'sourceGrounding'\)[\s\S]*?SELECTION_ONLY_SOURCE_GROUNDING/, `${label}: sidepanel should consume structural source-grounding state`);
+    assert.match(panel, /const selectionGroundingByTab = new Map\(\);/, `${label}: selected-text policy should be isolated per tab`);
+    assert.match(panel, /function applyConversationScopeState\(tabId, state\) \{[\s\S]*?hasOwnProperty\.call\(state, 'sourceGrounding'\)[\s\S]*?normalizeSelectionSourceGrounding\(state\.sourceGrounding\)/, `${label}: sidepanel should consume allowlisted structural source-grounding state`);
     assert.match(panel, /async function hydrateChatHistoryIdentity[\s\S]*?applyConversationScopeState\(numericTabId, identity\);/, `${label}: scope state should restore with conversation identity`);
     assert.match(panel, /async function refreshConversationScopeState[\s\S]*?sendToBackground\('agent_run_state'[\s\S]*?applyConversationScopeState\(numericTabId, state\);[\s\S]*?return state;/, `${label}: scope refresh should apply only authoritative background state`);
     assert.match(panel, /async function restoreActiveRunState[\s\S]*?refreshConversationScopeState\(numericTabId\);[\s\S]*?applyActiveRunState/, `${label}: active-run restoration should reuse the authoritative scope refresh`);
@@ -20865,12 +20989,12 @@ test('selected-text scope is a durable visible sidepanel state with a New conver
     assert.match(background, /setConversationScopeChangeListener\(\(tabId, state\) => \{[\s\S]*?action: 'agent_update'[\s\S]*?type: 'conversation_scope'[\s\S]*?data: state/, `${label}: background should forward independent scope changes to open sidepanels`);
     assert.match(panel, /function handleAgentUpdateMessage\(msg\) \{\s*if \(msg\.type === 'conversation_scope'\) \{\s*applyConversationScopeState\(msg\.tabId, msg\.data\);\s*return;/, `${label}: sidepanel should apply scope broadcasts before run rendering guards`);
     assert.match(panel, /async function sendRunWithReconnect[\s\S]*?onState: state => \{[\s\S]*?applyConversationScopeState\(tabId, state\);[\s\S]*?return applyActiveRunState\(tabId, state\);/, `${label}: detached run probes should reconcile scope before returning journal-only results`);
-    assert.match(panel, /if \(sourceGrounding\) setSelectionGroundedForTab\(tabId, true\);/, `${label}: context-menu selection should reveal the notice without waiting for model output`);
+    assert.match(panel, /if \(sourceGrounding\) setSelectionGroundedForTab\(tabId, true, sourceGrounding\);/, `${label}: context-menu selection should reveal its exact policy without waiting for model output`);
     assert.equal((panel.match(/applyConversationScopeState\(tabId, res\);/g) || []).length >= 2, true, `${label}: chat and Continue results should reconcile scope state`);
     assert.match(panel, /function getInputPlaceholderKeys\(\) \{[\s\S]*?isSelectionGroundedForTab\(currentTabId\)[\s\S]*?sp\.input\.selection_placeholder/, `${label}: scoped conversations should not promise page-aware input`);
     assert.match(panel, /async function ensureActMode\(\) \{\s*if \(isSelectionGroundedForTab\(currentTabId\)\) \{[\s\S]*?sp\.selection_scope\.description[\s\S]*?return false;[\s\S]*?if \(agentMode === 'act'\) return true;/, `${label}: Act should reject selected-text scope before accepting a stale active mode`);
     assert.match(panel, /async function ensureDevMode\(\) \{\s*if \(isSelectionGroundedForTab\(currentTabId\)\) \{[\s\S]*?sp\.selection_scope\.description[\s\S]*?return false;[\s\S]*?if \(agentMode === 'dev'\) return true;/, `${label}: Dev should reject selected-text scope before accepting a stale active mode`);
-    assert.match(panel, /function rejectSelectionScopedMode\(mode,[\s\S]*?mode !== 'act' && mode !== 'dev'[\s\S]*?SELECTION_ONLY_SOURCE_GROUNDING[\s\S]*?isSelectionGroundedForTab\(tabId\)[\s\S]*?sp\.selection_scope\.description[\s\S]*?return true;/, `${label}: restored controls should share one selected-scope mode guard`);
+    assert.match(panel, /function rejectSelectionScopedMode\(mode,[\s\S]*?mode !== 'act' && mode !== 'dev'[\s\S]*?normalizeSelectionSourceGrounding\(sourceGrounding\)[\s\S]*?isSelectionGroundedForTab\(tabId\)[\s\S]*?sp\.selection_scope\.description[\s\S]*?return true;/, `${label}: restored controls should share one selected-scope mode guard`);
     assert.match(panel, /function resumeAfterSubscription\(btn\) \{[\s\S]*?if \(rejectSelectionScopedMode\(mode\)\) return;[\s\S]*?setMode\(mode\);[\s\S]*?continueAgent\(/, `${label}: subscription resume should reject restored Act or Dev mode before continuing`);
     assert.match(panel, /function bindErrorRetryButton\(btn\) \{[\s\S]*?rejectSelectionScopedMode\(payload\.mode, currentTabId, payload\.sourceGrounding\)[\s\S]*?setMode\(payload\.mode\);[\s\S]*?sendMessage\(/, `${label}: error retry should reject restored Act or Dev mode before resubmitting`);
     assert.match(panel, /const modeForSend = retryOptions\?\.mode \|\| modeOverride \|\| modeForMessageText\(text\);\s*if \(rejectSelectionScopedMode\(modeForSend, tabId, sourceGrounding\)\) return false;/, `${label}: chat start should enforce the selected-scope mode boundary centrally`);
@@ -20942,6 +21066,7 @@ test('selected-text scope is a durable visible sidepanel state with a New conver
       {
         currentTabId: 92,
         SELECTION_ONLY_SOURCE_GROUNDING: sourceGrounding,
+        normalizeSelectionSourceGrounding: (value) => value === sourceGrounding ? value : '',
         isSelectionGroundedForTab: () => true,
         showComposerToast: (message) => restoredModeToasts.push(message),
         t: () => 'selected-text scope warning',
@@ -20996,7 +21121,7 @@ test('selected-text scope is a durable visible sidepanel state with a New conver
       ['active', 91, sourceGrounding],
     ], `${label}: detached state probes should apply scope before active run UI`);
 
-    assert.match(agent, /async getConversationState\(tabId, mode = null\)[\s\S]*?sourceGrounding: selectionGrounded \? SELECTION_ONLY_SOURCE_GROUNDING : null/, `${label}: agent should report only the structural selected-text scope marker`);
+    assert.match(agent, /async getConversationState\(tabId, mode = null\)[\s\S]*?sourceGrounding: selectionGrounded[\s\S]*?normalizeSelectionScopeSourceGrounding\(scope\?\.sourceGrounding, scope\?\.action\)[\s\S]*?SELECTION_ONLY_SOURCE_GROUNDING[\s\S]*?: null/, `${label}: agent should report the action-constrained selected-text policy with a legacy fallback`);
     assert.match(background, /case 'ensure_conversation_id':[\s\S]*?agent\.getConversationState\(tabId, msg\.mode \|\| 'ask'\)/, `${label}: identity hydration should return scope state`);
     assert.match(background, /case 'agent_run_state':[\s\S]*?agent\.getConversationState\(tabId\)[\s\S]*?agent\.activeRunState\(tabId\)/, `${label}: reconnect polling should return scope state`);
   }
@@ -22261,6 +22386,156 @@ test('chrome fetch fallback clears offscreen proxy timeout after success', async
   }
 });
 
+test('chrome fetch fallback chunks multipart blobs through disk-backed offscreen staging', async () => {
+  const previousChrome = globalThis.chrome;
+  const previousFetch = globalThis.fetch;
+  const previousWarn = console.warn;
+  const previousNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  let initialRequest = null;
+  let connectListener = null;
+  const sentToOffscreen = [];
+  const stagedFiles = new Map();
+  console.warn = () => {};
+
+  try {
+    const stagedDir = {
+      async *keys() { yield* stagedFiles.keys(); },
+      async removeEntry(filename) { stagedFiles.delete(filename); },
+      async getFileHandle(filename, { create = false } = {}) {
+        if (create && !stagedFiles.has(filename)) {
+          stagedFiles.set(filename, { parts: [], closed: false });
+        }
+        const staged = stagedFiles.get(filename);
+        if (!staged) throw new Error('staged file not found');
+        return {
+          async createWritable() {
+            return {
+              async write(chunk) { staged.parts.push(new Uint8Array(chunk)); },
+              async close() { staged.closed = true; },
+              async abort() {
+                staged.parts = [];
+                staged.closed = true;
+              },
+            };
+          },
+          async getFile() { return new Blob(staged.parts); },
+        };
+      },
+    };
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        storage: {
+          async getDirectory() {
+            return { async getDirectoryHandle() { return stagedDir; } };
+          },
+        },
+      },
+    });
+    globalThis.fetch = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    globalThis.chrome = {
+      offscreen: {
+        async hasDocument() { return true; },
+      },
+      runtime: {
+        onMessage: { addListener() {} },
+        onConnect: { addListener(fn) { connectListener = fn; } },
+      },
+    };
+    const offscreenUrl = 'file://' + path.join(ROOT, 'src/chrome/src/offscreen/offscreen.js').replace(/\\/g, '/') + `?multipart=${Date.now()}`;
+    await import(offscreenUrl);
+    assert.equal(typeof connectListener, 'function');
+
+    globalThis.fetch = async (url, options) => {
+      if (!initialRequest) {
+        throw new TypeError('Failed to fetch');
+      }
+      assert.equal(String(url), 'http://127.0.0.1:1234/v1/audio/transcriptions');
+      assert.ok(options.body instanceof FormData);
+      assert.equal(options.body.get('model'), 'whisper-local');
+      const file = options.body.get('file');
+      assert.ok(file instanceof Blob);
+      assert.equal(file.name, 'probe.wav');
+      assert.equal(file.type, 'audio/wav');
+      const received = new Uint8Array(await file.arrayBuffer());
+      assert.equal(received.byteLength, 600_000);
+      assert.deepEqual([...received.subarray(0, 4)], [82, 73, 70, 70]);
+      assert.equal(received[received.length - 1], 255);
+      return new Response(JSON.stringify({ text: '' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    globalThis.chrome.runtime.connect = () => {
+      const callerMessageListeners = [];
+      const callerDisconnectListeners = [];
+      const offscreenRequestListeners = [];
+      const portForOffscreen = {
+        name: 'offscreen-fetch-stream',
+        onMessage: { addListener(fn) { offscreenRequestListeners.push(fn); } },
+        postMessage(msg) {
+          queueMicrotask(() => callerMessageListeners.forEach((fn) => fn(msg)));
+        },
+      };
+      connectListener(portForOffscreen);
+      return {
+        onMessage: { addListener(fn) { callerMessageListeners.push(fn); } },
+        onDisconnect: { addListener(fn) { callerDisconnectListeners.push(fn); } },
+        postMessage(msg) {
+          sentToOffscreen.push(msg);
+          if (msg.url) initialRequest = msg;
+          queueMicrotask(() => offscreenRequestListeners.forEach((fn) => fn(msg)));
+        },
+        disconnect() {
+          callerDisconnectListeners.forEach((fn) => fn());
+        },
+      };
+    };
+
+    const fetchUrl = 'file://' + path.join(ROOT, 'src/chrome/src/providers/fetch-with-fallback.js').replace(/\\/g, '/') + `?multipart=${Date.now()}`;
+    const { fetchWithFallback } = await import(fetchUrl);
+    const fileBytes = new Uint8Array(600_000);
+    fileBytes.set([82, 73, 70, 70]);
+    fileBytes[fileBytes.length - 1] = 255;
+    const form = new FormData();
+    form.append('file', new Blob([fileBytes], { type: 'audio/wav' }), 'probe.wav');
+    form.append('model', 'whisper-local');
+    const response = await fetchWithFallback('http://127.0.0.1:1234/v1/audio/transcriptions', {
+      method: 'POST',
+      body: form,
+      timeoutMs: 12345,
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), '{"text":""}');
+    assert.equal(initialRequest.bodyType, 'form-data-chunked');
+    assert.equal(initialRequest.body, undefined);
+    assert.deepEqual(initialRequest.formDataEntries.map(({ name, kind }) => ({ name, kind })), [
+      { name: 'file', kind: 'blob' },
+      { name: 'model', kind: 'text' },
+    ]);
+    assert.equal(Object.hasOwn(initialRequest.formDataEntries[0], 'value'), false);
+    const chunkMessages = sentToOffscreen.filter(({ type }) => type === 'form-data-chunk');
+    assert.equal(chunkMessages.length, 3, '600KB upload should be split into bounded 256KiB chunks');
+    assert.equal(sentToOffscreen.at(-1)?.type, 'form-data-complete');
+    assert.equal(stagedFiles.size, 0, 'offscreen staging files should be removed after request upload');
+  } finally {
+    if (previousChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = previousChrome;
+    if (previousFetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = previousFetch;
+    if (previousNavigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', previousNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+    console.warn = previousWarn;
+  }
+});
+
 test('chrome fetch fallback resolves null-body proxy statuses without hanging', async () => {
   const previousChrome = globalThis.chrome;
   const previousFetch = globalThis.fetch;
@@ -23319,7 +23594,7 @@ test('settings tabs validate saved and hash tab names without selector interpola
   }
 });
 
-test('settings moves profile and memory controls into Memory while CAPTCHA stays in General advanced', () => {
+test('settings organizes General Basic and Advanced controls while keeping profile and memory controls in Memory', () => {
   for (const [label, htmlRel] of [
     ['chrome', 'src/chrome/src/ui/settings.html'],
     ['firefox', 'src/firefox/src/ui/settings.html'],
@@ -23352,15 +23627,41 @@ test('settings moves profile and memory controls into Memory while CAPTCHA stays
     assert.match(displayPanel, /id="general-search-empty" hidden/, `${label}: General search should include an empty-result state`);
     assert.match(html, /\.general-search-hidden \{ display: none !important; \}/, `${label}: General search should force-hide filtered rows/cards`);
 
+    const basicIds = [
+      'select-language',
+      'select-auto-screenshot',
+      'input-cost-session-limit',
+      'input-cost-total-limit',
+    ];
+    const basicIndexes = basicIds.map((id) => displayPanel.indexOf(`id="${id}"`));
+    basicIndexes.forEach((index, position) => {
+      assert.notEqual(index, -1, `${label}: ${basicIds[position]} should remain in General`);
+      assert.ok(index < advancedStart, `${label}: ${basicIds[position]} should stay in Basic`);
+    });
+    const requestedTailIds = [
+      'range-request-timeout',
+      'select-auto-screenshot',
+      'input-cost-session-limit',
+      'input-cost-total-limit',
+      'toggle-help-improve',
+    ];
+    const requestedTailIndexes = requestedTailIds.map((id) => displayPanel.indexOf(`id="${id}"`));
+    assert.ok(
+      requestedTailIndexes.every((index, position) => position === 0 || requestedTailIndexes[position - 1] < index),
+      `${label}: Auto screenshot and both Cloud allowances should follow LLM request timeout and precede Help Improve WebBrain`,
+    );
+
     for (const id of [
+      'toggle-tracing',
+      'toggle-verbose',
+      'toggle-scheduled-tasks',
+      'toggle-scheduled-confirm',
+      'toggle-notify-sound',
+      'toggle-completion-confetti',
       'toggle-screenshot-fallback',
       'range-clarify-timeout',
       'toggle-site-adapters',
       'toggle-api-mutation-observer',
-      'select-auto-screenshot',
-      'toggle-tracing',
-      'input-cost-session-limit',
-      'input-cost-total-limit',
       'toggle-strict-secret',
       'toggle-allow-local-network',
       'captcha-card',
@@ -23376,24 +23677,26 @@ test('settings moves profile and memory controls into Memory while CAPTCHA stays
     assert.equal(memoryPanel.indexOf('id="captcha-card"'), -1, `${label}: CAPTCHA should stay out of Memory`);
 
     for (const id of [
-      'select-language',
       'select-theme',
       'input-download-directory',
-      'toggle-verbose',
       'select-plan-before-act-mode',
-      'toggle-scheduled-tasks',
-      'toggle-scheduled-confirm',
-      'toggle-notify-sound',
-      'toggle-completion-confetti',
       'range-max-steps',
       'range-request-timeout',
-      'btn-open-traces',
-      'btn-open-history',
       'toggle-help-improve',
     ]) {
       const index = displayPanel.indexOf(`id="${id}"`);
       assert.notEqual(index, -1, `${label}: ${id} should remain visible in General`);
       assert.ok(index < advancedStart, `${label}: ${id} should stay outside Advanced`);
+    }
+
+    assert.equal(displayPanel.indexOf('id="btn-open-traces"'), -1, `${label}: redundant Open Traces setting should be removed`);
+    assert.equal(displayPanel.indexOf('id="btn-open-history"'), -1, `${label}: redundant Chat History setting should be removed`);
+    assert.match(displayPanel, /data-i18n-html="st\.display\.tracing\.desc_html"/, `${label}: Record traces should retain its inline Traces-page link`);
+    const localeDir = path.join(ROOT, path.dirname(htmlRel), 'locales');
+    for (const filename of fs.readdirSync(localeDir).filter((name) => name.endsWith('.js'))) {
+      const localeSource = fs.readFileSync(path.join(localeDir, filename), 'utf8');
+      const tracingDescription = localeSource.match(/["']st\.display\.tracing\.desc_html["']\s*:[^\n]+/)?.[0] || '';
+      assert.match(tracingDescription, /href=\\?["']traces\.html/, `${label}/${filename}: Record traces should link to the Traces page`);
     }
 
     assert.match(html, /\.advanced-settings \{[\s\S]*?margin: 22px 0 32px;[\s\S]*?padding: 16px 0 22px;[\s\S]*?border-bottom: 1px solid var\(--border\);/, `${label}: Advanced should have bottom padding and a clear lower boundary`);
@@ -23525,9 +23828,9 @@ test('Help Improve WebBrain is default-on, persisted, and reloads Cloud request 
 
     assert.match(html, /id="toggle-help-improve" checked/, `${label}: Help Improve should be on by default in General`);
     const helpImproveIndex = html.indexOf('id="toggle-help-improve"');
-    const historyIndex = html.indexOf('id="btn-open-history"');
+    const requestTimeoutIndex = html.indexOf('id="range-request-timeout"');
     const advancedIndex = html.indexOf('<details class="advanced-settings">');
-    assert.ok(historyIndex > -1 && historyIndex < helpImproveIndex && helpImproveIndex < advancedIndex, `${label}: Help Improve should be the last visible General setting above Advanced`);
+    assert.ok(requestTimeoutIndex > -1 && requestTimeoutIndex < helpImproveIndex && helpImproveIndex < advancedIndex, `${label}: Help Improve should be the last visible General setting above Advanced`);
     assert.match(settings, /helpImproveToggle\.checked = stored\.helpImproveWebBrain !== false/, `${label}: missing default-on storage hydration`);
     assert.match(settings, new RegExp(`${runtime}\\.storage\\.local\\.set\\(\\{ helpImproveWebBrain: helpImproveToggle\\.checked \\}\\)`), `${label}: setting should persist`);
     assert.match(locale, /'st\.display\.help_improve\.label': 'Help Improve WebBrain'/, `${label}: setting label missing`);
@@ -23689,10 +23992,13 @@ test('settings Providers tab has a search box beside provider filters', () => {
     const locale = fs.readFileSync(path.join(ROOT, localeRel), 'utf8');
 
     assert.match(html, /\.provider-filter-pills \{[\s\S]*?display: flex;[\s\S]*?gap: 12px;/, `${label}: provider filters should sit in their own row group`);
-    assert.match(html, /\.provider-search \{[\s\S]*?flex: 0 1 240px;[\s\S]*?margin: 0 0 0 auto;/, `${label}: provider search should sit to the right of filters`);
+    assert.match(html, /\.provider-search \{[\s\S]*?flex: 0 1 200px;[\s\S]*?min-width: 160px;[\s\S]*?margin: 0 0 0 auto;/, `${label}: provider search should leave room for all provider filters`);
     assert.match(locale, /'st\.providers\.search\.placeholder': 'Search providers'/, `${label}: provider search placeholder should be localized`);
     assert.match(locale, /'st\.providers\.search\.empty': 'No providers match this search and filter\.'/, `${label}: provider search empty state should be localized`);
     assert.match(settings, /let providerSearchQuery = '';/, `${label}: provider search query should be session state`);
+    assert.match(settings, /\['all','active','local','cloud','router'\]\.includes\(stored\.providerFilter\)/, `${label}: stored provider filters should accept active`);
+    assert.match(settings, /\{ key: 'all',[\s\S]*?\{ key: 'active', labelKey: 'st\.providers\.active' \},[\s\S]*?\{ key: 'local'/, `${label}: Active should appear between All and Local`);
+    assert.match(settings, /if \(providerFilter === 'active' && !isConfigured\) continue;[\s\S]*?providerFilter !== 'active'[\s\S]*?!isSelected/, `${label}: Active should be strict while category filters keep the selected provider visible`);
     assert.match(settings, /function providerSearchTextForEntry\(id, config, fieldDefs\) \{[\s\S]*?field\.labelKey \? t\(field\.labelKey\) : field\.label,[\s\S]*?config\.model,[\s\S]*?config\.baseUrl,[\s\S]*?\}/, `${label}: provider search should index labels, models, and URLs`);
     assert.match(settings, /function providerSearchRank\(id, config, query\) \{[\s\S]*?name === query[\s\S]*?name\.startsWith\(query\)[\s\S]*?name\.includes\(query\)[\s\S]*?\}/, `${label}: exact provider names should rank above prefix and substring matches`);
     assert.match(settings, /if \(providerQuery\) \{[\s\S]*?rank: providerSearchRank\(entry\[0\], entry\[1\], providerQuery\),[\s\S]*?\.sort\(\(a, b\) => a\.rank - b\.rank \|\| a\.index - b\.index\)[\s\S]*?\}/, `${label}: provider search should sort matches by relevance while preserving the original order for ties`);
@@ -24858,6 +25164,8 @@ test('provider picker exposes only WebBrain Cloud, configured providers, and Mor
 
     assert.match(settings, /const isConfigured = id !== 'webbrain_cloud' && config\.configured === true/, `${label}: Settings should derive Active from configured state`);
     assert.match(settings, /const isSelected = id === activeProviderId/, `${label}: Settings should derive Selected independently`);
+    assert.match(settings, /function refreshActiveProviderFilterCount\(\) \{[\s\S]*?Object\.entries\(providersData\)[\s\S]*?providerIsActive\(id, config\)[\s\S]*?\.provider-filter-pill\[data-filter="active"\] \.provider-filter-count[\s\S]*?countEl\.textContent = String\(count\);[\s\S]*?\}/, `${label}: Active filter count should derive from current configured state`);
+    assert.match(settings, /function refreshProviderCardStatus\(id\) \{\s*\/\/[\s\S]*?refreshActiveProviderFilterCount\(\);\s*const card = document\.querySelector/, `${label}: provider saves should refresh Active count before any missing-card return`);
     assert.match(settings, /st\.providers\.select_for_chat/, `${label}: Settings should use Select for chat terminology`);
     assert.match(settings, /await saveProvider\(id, \{ showFlash: false \}\);[\s\S]*?set_active_provider/, `${label}: selecting for chat should persist configuration first`);
     assert.match(settingsHtml, /\.provider-card\.selected \{ border-color: var\(--accent\); \}/, `${label}: selected card should retain the visual highlight`);
@@ -27036,9 +27344,30 @@ test('background opens context-menu UI before awaiting prompt save', () => {
 });
 
 test('selection shortcut builds allowlisted prompts with an untrusted selection boundary', () => {
-  for (const [label, buildSelectionPrompt, buildContextMenuPrompt] of [
-    ['chrome', buildSelectionPromptCh, buildContextMenuPromptCh],
-    ['firefox', buildSelectionPromptFx, buildContextMenuPromptFx],
+  for (const [
+    label,
+    buildSelectionPrompt,
+    buildContextMenuPrompt,
+    selectionOnlyGrounding,
+    selectionContextGrounding,
+    normalizeSourceGrounding,
+  ] of [
+    [
+      'chrome',
+      buildSelectionPromptCh,
+      buildContextMenuPromptCh,
+      SELECTION_ONLY_SOURCE_GROUNDING_CH,
+      SELECTION_CONTEXT_SOURCE_GROUNDING_CH,
+      normalizeSelectionSourceGroundingCh,
+    ],
+    [
+      'firefox',
+      buildSelectionPromptFx,
+      buildContextMenuPromptFx,
+      SELECTION_ONLY_SOURCE_GROUNDING_FX,
+      SELECTION_CONTEXT_SOURCE_GROUNDING_FX,
+      normalizeSelectionSourceGroundingFx,
+    ],
   ]) {
     for (const [action, instruction] of [
       ['summarize', 'Summarize this selected text clearly and concisely.'],
@@ -27062,6 +27391,25 @@ test('selection shortcut builds allowlisted prompts with an untrusted selection 
     const custom = buildSelectionPrompt('page data', 'custom', 'What does this imply?');
     assert.ok(custom.startsWith('Please answer this user question about the selected text:\nWhat does this imply?'), `${label}: custom question should stay outside the page-data boundary`);
     assert.ok(custom.indexOf('What does this imply?') < custom.indexOf('<untrusted_page_content'), `${label}: custom question should precede the untrusted selection`);
+    const broaderCustom = buildSelectionPrompt(
+      'The passage mentions cross-platform frameworks.',
+      'custom',
+      'Which frameworks exist?',
+      '',
+      selectionContextGrounding,
+    );
+    assert.match(broaderCustom, /You may use your intrinsic model knowledge/, `${label}: broader custom questions should explicitly permit intrinsic knowledge`);
+    assert.match(broaderCustom, /Do not use the live page, screenshots, tools, attachments, or earlier conversation/, `${label}: broader custom questions should retain the narrow context boundary`);
+    assert.doesNotMatch(broaderCustom, /Use only the text inside the selection block as source material/, `${label}: broader custom questions should not retain the selection-only source contract`);
+    assert.match(broaderCustom, /<untrusted_page_content id="ctx-[^"]+">\nThe passage mentions cross-platform frameworks\.\n<\/untrusted_page_content>/, `${label}: broader selection context must remain inside the untrusted boundary`);
+    assert.equal(
+      buildSelectionPrompt('page data', 'summarize', '', '', selectionContextGrounding),
+      '',
+      `${label}: fixed actions must not accept the broader grounding policy`,
+    );
+    assert.equal(normalizeSourceGrounding(selectionOnlyGrounding), selectionOnlyGrounding, `${label}: selection-only policy should normalize`);
+    assert.equal(normalizeSourceGrounding(selectionContextGrounding), selectionContextGrounding, `${label}: selection-context policy should normalize`);
+    assert.equal(normalizeSourceGrounding('screenshot_only'), '', `${label}: unknown source policies should be rejected`);
     assert.equal(buildSelectionPrompt('page data', 'custom', '   '), '', `${label}: blank custom questions should be rejected`);
     assert.equal(buildSelectionPrompt('page data', 'invented-action'), '', `${label}: unknown action ids should be rejected`);
     assert.equal(buildSelectionPrompt('page data', '__proto__'), '', `${label}: inherited object keys should not bypass the action allowlist`);
@@ -27091,7 +27439,7 @@ test('selection shortcut localizations cover every interface locale with browser
     'ms', 'nl', 'pl', 'pt', 'ru', 'th', 'tl', 'tr', 'uk', 'vi', 'zh',
   ];
   const expectedKeys = [
-    'askAbout', 'askQuestion', 'askSelection', 'explain', 'hideShortcut',
+    'askAbout', 'askQuestion', 'askSelection', 'explain', 'generalKnowledge', 'hideShortcut',
     'humanize', 'openChat', 'proofread', 'quiz', 'sendFailed', 'sendQuestion',
     'sentManual', 'summarize', 'translate', 'translateTo',
   ];
@@ -27324,6 +27672,106 @@ test('selection-only model requests exclude prior conversation context', async (
       assert.ok(persistedScope?.anchorFingerprint, `${label}: selected-text boundary should be durable`);
       assert.ok(Array.isArray(persistedScope?.excludedFingerprints), `${label}: excluded pre-selection history should be durable`);
     }
+  }
+});
+
+test('selection-context grounding persists intrinsic-knowledge scope without exposing prior context', async () => {
+  for (const [label, AgentClass, buildSelectionPrompt, sourceGrounding] of [
+    ['chrome', AgentCh, buildSelectionPromptCh, SELECTION_CONTEXT_SOURCE_GROUNDING_CH],
+    ['firefox', AgentFx, buildSelectionPromptFx, SELECTION_CONTEXT_SOURCE_GROUNDING_FX],
+  ]) {
+    const agent = new AgentClass({ getActive: () => ({ supportsVision: false }) });
+    const tabId = label === 'chrome' ? 9648 : 9649;
+    const messages = [
+      { role: 'system', content: 'system rules' },
+      { role: 'user', content: 'PRIOR PAGE AND ATTACHMENT SECRET' },
+      { role: 'assistant', content: 'Prior page answer.' },
+    ];
+    agent._hydrate = async () => {};
+    agent._persist = () => {};
+    agent.conversationIds.set(tabId, `${label}-selection-context`);
+    agent.conversations.set(tabId, messages);
+
+    const openingOptions = agent._selectionGroundedRunOptions(tabId, messages, {
+      sourceGrounding,
+      selectionAction: 'custom',
+    });
+    const anchor = {
+      role: 'user',
+      content: buildSelectionPrompt(
+        'This passage mentions cross-platform frameworks.',
+        'custom',
+        'Which frameworks exist?',
+        '',
+        sourceGrounding,
+      ),
+    };
+    messages.push(anchor);
+    agent._finalizeSelectionGroundingScope(tabId, messages, anchor);
+    messages.push({ role: 'assistant', content: 'Flutter, React Native, and Tauri are examples.' });
+
+    const followOptions = agent._selectionGroundedRunOptions(tabId, messages, {});
+    assert.equal(followOptions.sourceGrounding, sourceGrounding, `${label}: follow-up should retain the broader policy`);
+    assert.equal((await agent.getConversationState(tabId)).sourceGrounding, sourceGrounding, `${label}: persisted state should report the broader policy`);
+
+    const priorMessageSet = agent._selectionGroundingPriorMessageSet(tabId, messages);
+    const followUp = { role: 'user', content: 'Which one is best for desktop apps?' };
+    messages.push(followUp);
+    const modelView = agent._messagesForSourceGroundedRun(
+      messages,
+      followOptions,
+      followUp,
+      priorMessageSet,
+    );
+    const serialized = JSON.stringify(modelView);
+    assert.match(String(modelView[0]?.content), /intrinsic model knowledge/, `${label}: broader scope note should authorize intrinsic knowledge`);
+    assert.match(serialized, /cross-platform frameworks/, `${label}: selected anchor should remain available on follow-up`);
+    assert.match(serialized, /Which one is best for desktop apps/, `${label}: trusted follow-up should remain available`);
+    assert.doesNotMatch(serialized, /PRIOR PAGE AND ATTACHMENT SECRET|Prior page answer/, `${label}: broader scope must still exclude pre-selection context`);
+  }
+});
+
+test('selection-context grounding fails closed for forged fixed-action metadata', async () => {
+  for (const [label, AgentClass, contextGrounding, onlyGrounding] of [
+    ['chrome', AgentCh, SELECTION_CONTEXT_SOURCE_GROUNDING_CH, SELECTION_ONLY_SOURCE_GROUNDING_CH],
+    ['firefox', AgentFx, SELECTION_CONTEXT_SOURCE_GROUNDING_FX, SELECTION_ONLY_SOURCE_GROUNDING_FX],
+  ]) {
+    const agent = new AgentClass({ getActive: () => ({ supportsVision: false }) });
+    const tabId = label === 'chrome' ? 9650 : 9651;
+    const messages = [{ role: 'system', content: 'system rules' }];
+    agent._persist = () => {};
+    agent.conversationIds.set(tabId, `${label}-forged-selection-context`);
+    agent.conversations.set(tabId, messages);
+
+    const openingOptions = agent._selectionGroundedRunOptions(tabId, messages, {
+      sourceGrounding: contextGrounding,
+      selectionAction: 'summarize',
+    });
+    assert.equal(openingOptions.sourceGrounding, onlyGrounding, `${label}: fixed actions must downgrade broader grounding`);
+    assert.equal(openingOptions.selectionAction, 'summarize', `${label}: fixed-action provenance should remain intact`);
+    assert.equal(
+      agent.selectionGroundingScopes.get(tabId)?.sourceGrounding,
+      onlyGrounding,
+      `${label}: forged broader grounding must not enter durable state`,
+    );
+
+    const anchor = { role: 'user', content: 'forged persisted fixed-action selection' };
+    messages.push(anchor);
+    agent.selectionGroundingScopes.set(tabId, {
+      conversationId: `${label}-forged-selection-context`,
+      anchorIndex: 1,
+      anchorFingerprint: agent._selectionGroundingMessageFingerprint(anchor),
+      excludedFingerprints: [],
+      action: 'summarize',
+      sourceGrounding: contextGrounding,
+    });
+    const restoredOptions = agent._selectionGroundedRunOptions(tabId, messages, {});
+    assert.equal(restoredOptions.sourceGrounding, onlyGrounding, `${label}: restored forged scope must fail closed`);
+    assert.equal(
+      agent.selectionGroundingScopes.get(tabId)?.sourceGrounding,
+      onlyGrounding,
+      `${label}: restored forged scope should be repaired before reuse`,
+    );
   }
 });
 
@@ -27734,8 +28182,8 @@ test('sidepanel preserves selection-only grounding across retries and attachment
     const panel = fs.readFileSync(path.join(ROOT, prefix, 'src/ui/sidepanel.js'), 'utf8');
     assert.match(
       panel,
-      /const requestedSourceGrounding = retryOptions\?\.sourceGrounding \?\? chatExtraParams\.sourceGrounding;[\s\S]*?requestedSourceGrounding === SELECTION_ONLY_SOURCE_GROUNDING/,
-      `${label}: retries should retain allowlisted source grounding`,
+      /const requestedSourceGrounding = retryOptions\?\.sourceGrounding \?\? chatExtraParams\.sourceGrounding;[\s\S]*?normalizeSelectionSourceGrounding\(requestedSourceGrounding\)/,
+      `${label}: retries should retain either allowlisted selection grounding policy`,
     );
     assert.match(
       panel,
@@ -27754,8 +28202,8 @@ test('sidepanel preserves selection-only grounding across retries and attachment
     );
     assert.match(
       panel,
-      /dataset\.retrySourceGrounding[\s\S]*?SELECTION_ONLY_SOURCE_GROUNDING/,
-      `${label}: rendered retry controls should preserve the selection boundary`,
+      /dataset\.retrySourceGrounding[\s\S]*?normalizeSelectionSourceGrounding/,
+      `${label}: rendered retry controls should preserve either allowlisted selection boundary`,
     );
     assert.match(
       panel,
@@ -27786,8 +28234,8 @@ test('sidepanel preserves selection-only grounding across retries and attachment
     const agent = fs.readFileSync(path.join(ROOT, prefix, 'src/agent/agent.js'), 'utf8');
     assert.match(
       agent,
-      /const selectionOnly = runOptions\?\.sourceGrounding === SELECTION_ONLY_SOURCE_GROUNDING;[\s\S]*?const sourceBoundAttachments = selectionOnly \? \[\] : attachments;/,
-      `${label}: agent trust boundary should reject explicit attachments on selection-only runs`,
+      /const selectionOnly = isSelectionSourceGrounding\(runOptions\?\.sourceGrounding\);[\s\S]*?const sourceBoundAttachments = selectionOnly \? \[\] : attachments;/,
+      `${label}: agent trust boundary should reject explicit attachments under either selection policy`,
     );
     assert.match(
       agent,
@@ -27923,10 +28371,12 @@ test('selection shortcut is shipped, enabled by default, and keeps browser-speci
     assert.match(content, /const STORAGE_KEY = 'selectionShortcutEnabled';/, `${label}: content script should use the persistent setting`);
     assert.match(content, /const LOCALE_STORAGE_KEY = 'wbLocale';/, `${label}: content script should use the plugin interface language`);
     assert.match(content, /data-action="translate">Translate<\/button>/, `${label}: floating popup should expose one-click Translate`);
+    assert.match(content, /class="knowledge-option"[\s\S]*?<input type="checkbox">[\s\S]*?<span>Use general knowledge<\/span>/, `${label}: custom question UI should expose an explicit conservative-default knowledge choice`);
     assert.doesNotMatch(content, /class="language-select"|class="translate-view"/, `${label}: floating Translate should not open a second screen`);
     assert.match(content, /submitSelection\(button\.dataset\.action, '', interfaceLanguage\)/, `${label}: every floating preset should submit directly in the plugin language`);
     assert.match(content, /const LOCALIZATION_MESSAGE = 'WB_SELECTION_SHORTCUT_LOCALIZATION';/, `${label}: floating shortcuts should request their labels from the extension background`);
     assert.match(content, /language: action === 'custom' \? undefined : \(language \|\| interfaceLanguage\)/, `${label}: fixed actions should carry the interface language while custom questions stay untouched`);
+    assert.match(content, /allowGeneralKnowledge: action === 'custom' \? generalKnowledge\?\.checked === true : undefined/, `${label}: only custom questions should submit the broader grounding choice`);
     assert.match(content, /function applyLocalization\(\)[\s\S]*?host\.dir = localization\.dir;[\s\S]*?button\.textContent = strings\[action\];/, `${label}: localization should update direction and visible labels on the existing surface`);
     assert.match(content, /class="shortcut-icon" aria-hidden="true">\?<\/span>/, `${label}: shortcut should use the compact question-mark icon`);
     assert.match(content, /border:1px solid rgba\(108,99,255,\.34\);[\s\S]*?color:var\(--accent\);/, `${label}: shortcut should use the WebBrain purple treatment`);
@@ -27957,8 +28407,8 @@ test('selection shortcut is shipped, enabled by default, and keeps browser-speci
     assert.match(background, /Object\.entries\(SELECTION_TRANSLATION_LANGUAGES\)/, `${label}: native Translate submenu should list every supported language`);
     assert.match(background, /selectionTranslationLanguageLabel\(code, localization\.locale\) \|\| title/, `${label}: native translation targets should use localized language names with an English fallback`);
     assert.match(background, /buildSelectionPrompt\(info\.selectionText, 'translate', '', menuItemId\.slice\(CONTEXT_MENU_TRANSLATE_PREFIX\.length\)\)/, `${label}: native language choices should use the safe selection prompt builder`);
-    assert.match(background, /sourceGrounding: SELECTION_ONLY_SOURCE_GROUNDING/, `${label}: selected-text payloads should carry structural source grounding`);
-    assert.match(background, /msg\.sourceGrounding === SELECTION_ONLY_SOURCE_GROUNDING\s*\?\s*\{\s*sourceGrounding: SELECTION_ONLY_SOURCE_GROUNDING,/, `${label}: only allowlisted grounding should reach agent run options`);
+    assert.match(background, /const sourceGrounding = selectionAction === 'custom' && msg\.allowGeneralKnowledge === true[\s\S]*?SELECTION_CONTEXT_SOURCE_GROUNDING[\s\S]*?SELECTION_ONLY_SOURCE_GROUNDING;/, `${label}: only custom questions should opt into broader structural grounding`);
+    assert.match(background, /\.\.\.\(normalizeSelectionSourceGrounding\(msg\.sourceGrounding\)[\s\S]*?sourceGrounding: normalizeSelectionSourceGrounding\(msg\.sourceGrounding\),/, `${label}: only allowlisted grounding should reach agent run options`);
     assert.match(background, /parentId: CONTEXT_MENU_ASK_SELECTION_ID[\s\S]*?\['humanize', 'humanize'\]/, `${label}: native submenu should include localized Humanize`);
     assert.match(background, /changes\.wbLocale[\s\S]*?selectionShortcutLocale = normalizeSelectionShortcutLocale\(changes\.wbLocale\.newValue\);[\s\S]*?createContextMenus\(\)\.catch/, `${label}: changing the interface locale should rebuild native context menus`);
     assert.match(background, /buildSelectionPrompt\(info\.selectionText, selectionAction, '', selectionShortcutLocale\)/, `${label}: native fixed actions should request the interface response language`);
@@ -27973,8 +28423,8 @@ test('selection shortcut is shipped, enabled by default, and keeps browser-speci
     assert.match(prompts, /const selectionAction = sourceGrounding \? normalizeSelectionAction\(payload\?\.selectionAction\) : '';/, `${label}: only a source-bound prompt should keep a shortcut action`);
     assert.match(prompts, /\.\.\.\(payload\.selectionAction \? \{ selectionAction: payload\.selectionAction \} : \{\}\),/, `${label}: the stored action should ride with the prompt it belongs to`);
     assert.match(panelSource, /const requestedSelectionAction = retryOptions\?\.selectionAction \?\? chatExtraParams\.selectionAction;[\s\S]*?const selectionAction = sourceGrounding \? normalizeSelectionAction\(requestedSelectionAction\) : '';[\s\S]*?delete chatExtraParams\.selectionAction;/, `${label}: sidepanel should retain retry actions but drop actions without selected-text grounding`);
-    assert.match(agentSource, /action: normalizeSelectionAction\(runOptions\?\.selectionAction\),/, `${label}: the durable scope should record the shortcut action`);
-    assert.match(agentSource, /action: normalizeSelectionAction\(entry\.selectionGroundingScope\.action\),/, `${label}: a restarted worker should restore the shortcut action`);
+    assert.match(agentSource, /const explicitSelectionAction = normalizeSelectionAction\(runOptions\?\.selectionAction\);[\s\S]*?action: explicitSelectionAction,/, `${label}: the durable scope should record the normalized shortcut action`);
+    assert.match(agentSource, /const action = normalizeSelectionAction\(entry\.selectionGroundingScope\.action\);[\s\S]*?action,[\s\S]*?normalizeSelectionScopeSourceGrounding\([\s\S]*?entry\.selectionGroundingScope\.sourceGrounding,[\s\S]*?action,/, `${label}: a restarted worker should restore the action and fail closed on contradictory broader grounding`);
     assert.match(agentSource, /selectionAction: normalizeSelectionAction\(scope\?\.action\),/, `${label}: follow-up turns should read the action off the scope, not a resent field`);
   }
 
@@ -28087,9 +28537,9 @@ function createContextMenuPromptHarness(createHandler, prompt, sendMessage, opti
 }
 
 test('context-menu prompt transport preserves only allowlisted selection grounding', async () => {
-  for (const [label, createHandler, sourceGrounding] of [
-    ['chrome', createContextMenuPromptHandlerCh, SELECTION_ONLY_SOURCE_GROUNDING_CH],
-    ['firefox', createContextMenuPromptHandlerFx, SELECTION_ONLY_SOURCE_GROUNDING_FX],
+  for (const [label, createHandler, sourceGrounding, contextGrounding] of [
+    ['chrome', createContextMenuPromptHandlerCh, SELECTION_ONLY_SOURCE_GROUNDING_CH, SELECTION_CONTEXT_SOURCE_GROUNDING_CH],
+    ['firefox', createContextMenuPromptHandlerFx, SELECTION_ONLY_SOURCE_GROUNDING_FX, SELECTION_CONTEXT_SOURCE_GROUNDING_FX],
   ]) {
     const prompt = {
       id: `${label}-grounded`,
@@ -28112,6 +28562,19 @@ test('context-menu prompt transport preserves only allowlisted selection groundi
     assert.equal(contextMenuClaim.promptId, prompt.id, `${label}: run-start ownership should stay prompt-scoped`);
     assert.equal(typeof contextMenuClaim.claimantId, 'string', `${label}: run-start ownership should include the panel claimant`);
     assert.equal(typeof __onContextMenuClaimRejected, 'function', `${label}: reservation loss should remain locally retryable`);
+
+    const contextPrompt = {
+      id: `${label}-selection-context`,
+      tabId: 6,
+      text: 'Which frameworks exist?',
+      sourceGrounding: contextGrounding,
+      selectionAction: 'custom',
+    };
+    const broader = createContextMenuPromptHarness(createHandler, contextPrompt, async () => true);
+    broader.handler.acceptContextMenuPrompt(contextPrompt);
+    await waitMicrotasks(3);
+    assert.equal(broader.sends[0].extra.sourceGrounding, contextGrounding, `${label}: explicit selection-context policy should survive sidepanel transport`);
+    assert.equal(broader.sends[0].extra.selectionAction, 'custom', `${label}: broader policy should retain the custom action provenance`);
 
     const invalidPrompt = {
       id: `${label}-invalid-grounding`,
@@ -40622,8 +41085,13 @@ test('extended provider catalog is complete, mirrored, safe, and excluded-provid
     assert.match(settings, /AI Gateway ID \(optional; @cf defaults to default\)/, `${label}: Cloudflare gateway field missing`);
     assert.match(
       settings,
-      /const filterCounts = Object\.values\(providersData\)\.reduce\(/,
+      /const filterCounts = Object\.entries\(providersData\)\.reduce\(/,
       `${label}: provider filter counts must be derived from live provider data`,
+    );
+    assert.match(
+      settings,
+      /if \(providerIsActive\(id, config\)\) counts\.active \+= 1;/,
+      `${label}: active provider count must include only configured providers`,
     );
     assert.match(
       settings,
@@ -52757,6 +53225,7 @@ function plannerIntentFixture({
   requestKind = 'execute',
   requiresStateChange = false,
   requiresSubmission = false,
+  requiresDownload = false,
   allowsPlannerShapedResult = false,
   allowsAppStateToolEvidence = false,
   readScope = null,
@@ -52770,6 +53239,7 @@ function plannerIntentFixture({
     request_kind: requestKind,
     requires_state_change: requiresStateChange,
     requires_submission: requiresSubmission,
+    completion_requirements: { download: requiresDownload },
     allows_planner_shaped_result: allowsPlannerShapedResult,
     allows_app_state_tool_evidence: allowsAppStateToolEvidence,
     read_scope: readScope || (requestKind === 'execute' ? 'visible_page' : 'none'),
@@ -53630,6 +54100,105 @@ test('completion words do not mask mixed progress plus plan terminals', () => {
   }
 });
 
+test('download-required execution accepts only completed DOWNLOAD-capability evidence', () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const agent = new AgentClass({});
+    const tabId = 8635 + index;
+    const state = agent._startPlanExecutionGuard(tabId, 'act', {
+      requestKind: 'execute',
+      requiresStateChange: false,
+      requiresDownload: true,
+    });
+    assert.equal(state.requiresStateChange, true, `${AgentClass.name}: download did not force consequential evidence`);
+
+    agent._markPlanExecutionToolCall(tabId, 'read_page', { success: true });
+    agent._markPlanExecutionToolCall(tabId, 'click_ax', { success: true }, { consequential: true });
+    agent._markPlanExecutionToolCall(
+      tabId,
+      'download_social_media',
+      { success: true, completedCount: 0, urls: ['https://cdn.example/video.mp4'] },
+      { consequential: true, download: true },
+    );
+    assert.equal(agent._executionEvidenceSatisfied(state), false, `${AgentClass.name}: read/click/URL evidence completed a download task`);
+    assert.equal(state.successfulDownloadToolCalls, 0, `${AgentClass.name}: media resolution counted as a saved file`);
+
+    agent._markPlanExecutionToolCall(tabId, 'list_downloads', {
+      success: true,
+      downloads: [{ id: 999, state: 'complete' }],
+    });
+    assert.equal(state.successfulDownloadToolCalls, 0, `${AgentClass.name}: unrelated historical download counted as task evidence`);
+
+    const rejected = [
+      { success: true, downloads: [{ success: true, downloadId: 11, state: 'in_progress' }] },
+      { success: false, downloads: [{ success: false, downloadId: 12, state: 'interrupted' }] },
+      { success: false, denied: true, error: 'permission denied' },
+      { success: false, pending: true, downloadId: 13, state: 'in_progress' },
+    ];
+    for (const result of rejected) {
+      agent._markPlanExecutionToolCall(tabId, 'download_files', result, { consequential: true, download: true });
+    }
+    assert.equal(state.successfulDownloadToolCalls, 0, `${AgentClass.name}: incomplete or denied download counted as complete`);
+
+    agent._markPlanExecutionToolCall(tabId, 'list_downloads', {
+      success: true,
+      downloads: [{ id: 11, state: 'complete' }],
+    });
+    assert.equal(state.successfulDownloadToolCalls, 1, `${AgentClass.name}: follow-up verification of the task download was rejected`);
+    assert.equal(agent._executionEvidenceSatisfied(state), true, `${AgentClass.name}: verified pending download did not satisfy the guard`);
+
+    const followUpTabId = tabId + 20;
+    const followUpState = agent._startPlanExecutionGuard(followUpTabId, 'act', {
+      requestKind: 'execute',
+      requiresDownload: true,
+    });
+    agent._markPlanExecutionToolCall(followUpTabId, 'read_page', { success: true });
+
+    const firstDecision = agent._planOnlyTerminalDecision(
+      followUpTabId,
+      'The file is ready.',
+      { viaDone: true, outcome: 'success' },
+    );
+    assert.equal(firstDecision?.retry, true, `${AgentClass.name}: missing download evidence bypassed recovery`);
+    assert.match(firstDecision?.nudge || '', /requires a file to be downloaded/i, `${AgentClass.name}: download recovery was not specific`);
+
+    agent._markPlanExecutionToolCall(followUpTabId, 'download_files', {
+      success: true,
+      downloads: [{ success: true, downloadId: 14, state: 'complete' }],
+    }, { consequential: true, download: true });
+    assert.equal(followUpState.successfulDownloadToolCalls, 1, `${AgentClass.name}: completed download was not counted`);
+    assert.equal(agent._executionEvidenceSatisfied(followUpState), true, `${AgentClass.name}: completed download did not satisfy the guard`);
+    assert.equal(
+      agent._planOnlyTerminalDecision(followUpTabId, 'The file was downloaded.', { viaDone: true, outcome: 'success' }),
+      null,
+      `${AgentClass.name}: verified download was rejected`,
+    );
+  }
+});
+
+test('download evidence recognizes completed core, screenshot, social, and skill results', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const accepted = [
+      ['download_resource_from_page', { success: true, downloadId: 21, state: 'complete' }],
+      ['screenshot', { success: true, savedFile: { downloadId: 22, state: 'complete' } }],
+      ['download_social_media', { success: true, completedCount: 1 }],
+      ['download_public_media', { success: true, downloadId: 23, state: 'complete' }],
+    ];
+    for (const [name, result] of accepted) {
+      assert.equal(agent._isSuccessfulDownloadEvidence(name, result), true, `${AgentClass.name}: ${name} completion rejected`);
+    }
+    const rejected = [
+      ['download_resource_from_page', { success: true, downloadId: 31 }],
+      ['screenshot', { success: true, savedFile: { downloadId: 32, state: 'in_progress' } }],
+      ['download_social_media', { success: true, completedCount: 0 }],
+      ['download_public_media', { success: true, downloadId: 33, state: 'in_progress', pending: true }],
+    ];
+    for (const [name, result] of rejected) {
+      assert.equal(agent._isSuccessfulDownloadEvidence(name, result), false, `${AgentClass.name}: ${name} incomplete result accepted`);
+    }
+  }
+});
+
 test('planner-bypassed managed cloud runs never enable the execution guard', () => {
   for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
     const agent = new AgentClass({});
@@ -53719,6 +54288,38 @@ test('trusted continuation carries consequential evidence without repeating the 
       `${AgentClass.name}: continuation repeated a consequential action`,
     );
     assert.equal(responses.length, 0, `${AgentClass.name}: continuation entered recovery`);
+  }
+});
+
+test('trusted continuation carries completed download evidence only for the same requirement', () => {
+  for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+    const agent = new AgentClass({});
+    const tabId = 8647 + index;
+    const conversationId = `download_continuation_${index}`;
+    const gate = {
+      requestKind: 'execute',
+      requiresStateChange: true,
+      requiresDownload: true,
+    };
+    agent.conversationIds.set(tabId, conversationId);
+    agent._startPlanExecutionGuard(tabId, 'act', gate);
+    agent._markPlanExecutionToolCall(tabId, 'download_resource_from_page', {
+      success: true,
+      downloadId: 41,
+      state: 'complete',
+    }, { consequential: true, download: true });
+    agent._storeContinuationExecutionEvidence(tabId);
+
+    const continued = agent._startPlanExecutionGuard(tabId, 'act', gate, { trustedContinuation: true });
+    assert.equal(continued.successfulDownloadToolCalls, 1, `${AgentClass.name}: trusted continuation lost download evidence`);
+    assert.equal(agent._executionEvidenceSatisfied(continued), true, `${AgentClass.name}: carried download evidence was unusable`);
+
+    agent._storeContinuationExecutionEvidence(tabId);
+    const changedRequirement = agent._startPlanExecutionGuard(tabId, 'act', {
+      ...gate,
+      requiresDownload: false,
+    }, { trustedContinuation: true });
+    assert.equal(changedRequirement.successfulDownloadToolCalls, 0, `${AgentClass.name}: mismatched requirement reused download evidence`);
   }
 });
 
@@ -54782,6 +55383,7 @@ test('planner intent preserves Act and canonical execution fields when localized
             request_kind: 'execute',
             requires_state_change: false,
             requires_submission: false,
+            completion_requirements: { download: true },
             allows_planner_shaped_result: false,
             allows_app_state_tool_evidence: true,
             read_scope: 'visible_page',
@@ -54813,8 +55415,47 @@ test('planner intent preserves Act and canonical execution fields when localized
       assert.equal(gate.proceed, true, `${AgentClass.name}: recoverable localization blocked execution`);
       assert.equal(gate.requestKind, 'execute', `${AgentClass.name}: download intent was downgraded`);
       assert.equal(gate.plannerFailedContinueAct, undefined, `${AgentClass.name}: valid download plan was marked as a planner failure`);
-      assert.equal(gate.requiresStateChange, false, `${AgentClass.name}: localization recovery changed canonical execution metadata`);
+      assert.equal(gate.requiresStateChange, true, `${AgentClass.name}: download completion did not correct state-change evidence`);
+      assert.equal(gate.requiresDownload, true, `${AgentClass.name}: compact planner dropped download completion metadata`);
       assert.equal(warning, '', `${AgentClass.name}: recoverable localization emitted a planner failure warning`);
+    }
+  });
+});
+
+test('full planner carries download completion metadata into the execution guard', async () => {
+  await withPlannerBrowserGlobals(async () => {
+    for (const [index, AgentClass] of [AgentCh, AgentFx].entries()) {
+      const agent = new AgentClass({ getActive: () => ({ name: 'planner-test', model: 'planner-test' }) });
+      agent.setScheduledRunPolicy(8920 + index, {
+        requireConsequentialConfirmation: false,
+        autoApprovePlanReview: true,
+      });
+      agent._chatWithCostAllowance = async () => ({
+        content: plannerFixtureJson({
+          requires_state_change: false,
+          completion_requirements: { download: true },
+          summary: 'Download the selected video.',
+          steps: [{ id: '1', action: 'Download the selected video.', tools: ['download_files'] }],
+        }),
+      });
+      const gate = await agent._runPlannerGate(
+        8920 + index,
+        { role: 'user', content: 'Download the selected video.' },
+        () => {},
+        null,
+        null,
+        '',
+        { tabUrl: 'https://example.com/video', tabTitle: 'Video' },
+        'try',
+        'act',
+        { locale: 'en' },
+      );
+      assert.equal(gate.proceed, true, `${AgentClass.name}: download plan was blocked`);
+      assert.equal(gate.requiresStateChange, true, `${AgentClass.name}: full planner did not correct state-change evidence`);
+      assert.equal(gate.requiresDownload, true, `${AgentClass.name}: full planner dropped download completion metadata`);
+      const guard = agent._startPlanExecutionGuard(8930 + index, 'act', gate);
+      assert.equal(guard.requiresStateChange, true, `${AgentClass.name}: guard did not treat download as state-changing`);
+      assert.equal(guard.requiresDownload, true, `${AgentClass.name}: guard lost download requirement`);
     }
   });
 });
@@ -58076,6 +58717,71 @@ test('download_files treats interrupted browser downloads as failed (chrome & fi
   }
 });
 
+test('download_resource_from_page waits for browser-reported completion (chrome & firefox)', async () => {
+  const originalChrome = globalThis.chrome;
+  const originalBrowser = globalThis.browser;
+  try {
+    globalThis.chrome = {
+      runtime: { lastError: null },
+      scripting: {
+        async executeScript() {
+          return [{ result: { ok: true, url: 'https://example.com/report.pdf', isBlob: false, crossOrigin: false } }];
+        },
+      },
+      downloads: {
+        download(_options, callback) { callback(8101); },
+        search(_query, callback) {
+          callback([{
+            id: 8101,
+            filename: '/Users/test/Downloads/report.pdf',
+            state: 'complete',
+            bytesReceived: 10,
+            totalBytes: 10,
+          }]);
+        },
+      },
+    };
+    const chromeResult = await downloadResourceFromPageCh(42, { selector: '#report' });
+    assert.equal(chromeResult.success, true);
+    assert.equal(chromeResult.downloadId, 8101);
+    assert.equal(chromeResult.state, 'complete');
+
+    globalThis.browser = {
+      storage: {
+        local: { async get() { return { downloadDirectory: '' }; } },
+      },
+      tabs: {
+        async executeScript() {
+          return [{ ok: true, url: 'https://example.com/report.pdf', isBlob: false, crossOrigin: false }];
+        },
+      },
+      downloads: {
+        async download() { return 8102; },
+        async search() {
+          return [{
+            id: 8102,
+            filename: '/Users/test/Downloads/report.pdf',
+            state: 'interrupted',
+            error: 'NETWORK_FAILED',
+            bytesReceived: 4,
+            totalBytes: 10,
+          }];
+        },
+      },
+    };
+    const firefoxResult = await downloadResourceFromPageFx(42, { selector: '#report' });
+    assert.equal(firefoxResult.success, false);
+    assert.equal(firefoxResult.downloadId, 8102);
+    assert.equal(firefoxResult.state, 'interrupted');
+    assert.match(firefoxResult.error, /interrupted.*NETWORK_FAILED/i);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
+  }
+});
+
 test('upload_file schema accepts downloadId and no longer hard-requires filePath (chrome)', () => {
   const tools = getToolsForModeCh('act', {});
   const up = tools.find(t => t.function?.name === 'upload_file');
@@ -60939,6 +61645,88 @@ test('planner: canonical fields recover missing and partial localization without
   }
 });
 
+test('planner schemas require structured download completion metadata in both browsers', () => {
+  for (const [label, schema] of [
+    ['chrome full', PLANNER_RESPONSE_JSON_SCHEMA],
+    ['chrome intent', PLANNER_INTENT_RESPONSE_JSON_SCHEMA],
+    ['firefox full', PLANNER_RESPONSE_JSON_SCHEMA_FX],
+    ['firefox intent', PLANNER_INTENT_RESPONSE_JSON_SCHEMA_FX],
+  ]) {
+    assert.ok(schema.required.includes('completion_requirements'), `${label}: completion requirements are optional`);
+    const completion = schema.properties.completion_requirements;
+    assert.equal(completion?.type, 'object', `${label}: completion requirements are not structured`);
+    assert.equal(completion?.additionalProperties, false, `${label}: completion requirements accept undeclared fields`);
+    assert.deepEqual(completion?.required, ['download'], `${label}: download requirement is optional`);
+    assert.equal(completion?.properties?.download?.type, 'boolean', `${label}: download requirement is not boolean`);
+  }
+});
+
+test('planner download completion metadata is language-neutral and does not infer from prose', () => {
+  const cases = [
+    { task: 'download this video', download: true, locale: 'en' },
+    { task: 'save the selected media locally', download: true, locale: 'en' },
+    { task: 'find the URL to download the report', download: false, locale: 'en' },
+    { task: 'find the download link', download: false, locale: 'en' },
+    { task: 'explain how to download the report', download: false, locale: 'en' },
+    { task: '把这个视频下载到本地', download: true, locale: 'zh-CN' },
+    { task: '查找报告的下载链接', download: false, locale: 'zh-CN' },
+  ];
+  for (const [label, parse] of [['chrome', parsePlanFromContent], ['firefox', parsePlanFromContentFx]]) {
+    for (const fixture of cases) {
+      const raw = JSON.parse(plannerIntentFixture({
+        requiresDownload: fixture.download,
+        locale: fixture.locale,
+        localizedSummary: fixture.task,
+        localizedSteps: [fixture.task],
+      }));
+      // Keep canonical prose deliberately identical. Only the structured field
+      // may determine the completion requirement.
+      raw.summary = 'Handle the requested resource safely.';
+      raw.steps = [{ id: '1', action: 'Handle the requested resource safely.' }];
+      const plan = parse(JSON.stringify(raw), { requireIntent: true, locale: fixture.locale });
+      assert.equal(plan?.completion_requirements?.download, fixture.download, `${label}: ${fixture.task}`);
+      assert.equal(plan?.requires_state_change, fixture.download, `${label}: state-change correction for ${fixture.task}`);
+      assert.equal(
+        plan?.completion_requirement_correction,
+        fixture.download ? 'download_requires_state_change' : null,
+        `${label}: correction marker for ${fixture.task}`,
+      );
+    }
+
+    const legacy = parse(JSON.stringify({
+      request_kind: 'execute',
+      requires_state_change: false,
+      requires_submission: false,
+      read_scope: 'visible_page',
+      summary: 'Download this report and save it locally.',
+      steps: [{ id: '1', action: 'Download this report and save it locally.' }],
+      localized: {
+        locale: 'en',
+        summary: 'Download this report and save it locally.',
+        steps: [{ id: '1', action: 'Download this report and save it locally.' }],
+        risks: [],
+      },
+    }), { requireIntent: true, locale: 'en' });
+    assert.equal(legacy?.completion_requirements?.download, false, `${label}: legacy prose armed download evidence`);
+    assert.equal(legacy?.requires_state_change, false, `${label}: legacy prose changed execution intent`);
+  }
+});
+
+test('planner correction trace payload is content-free in both browsers', () => {
+  for (const browser of ['chrome', 'firefox']) {
+    const source = fs.readFileSync(path.join(ROOT, `src/${browser}/src/agent/agent.js`), 'utf8');
+    const start = source.indexOf('async _tracePlannerCompletionRequirementCorrection(');
+    const end = source.indexOf('\n  }', start);
+    assert.ok(start >= 0 && end > start, `${browser}: correction trace helper missing`);
+    const helper = source.slice(start, end + 4);
+    const payload = /planner_completion_requirement_corrected',\s*\{([\s\S]*?)\n\s*\}\);/.exec(helper)?.[1] || '';
+    assert.match(payload, /phase:/, `${browser}: trace omitted planner phase`);
+    assert.match(payload, /requirement:\s*'download'/, `${browser}: trace omitted requirement kind`);
+    assert.match(payload, /requiresStateChange:\s*true/, `${browser}: trace omitted runtime correction`);
+    assert.doesNotMatch(payload, /summary|steps|content|userMessage|localized|plan\?\./, `${browser}: trace exports planner text`);
+  }
+});
+
 test('planner: parse JSON inside markdown fence', () => {
   const fenced = 'Here is the plan:\n```json\n{"summary":"Go back","steps":[],"memory":{"use_scratchpad":false,"scratchpad_notes":[],"use_progress_ledger":false,"progress_action":null},"scheduling":null,"risks":[],"mode":"act"}\n```';
   const plan = parsePlanFromContent(fenced);
@@ -61195,6 +61983,7 @@ function plannerFixtureJson(overrides = {}) {
     request_kind: 'execute',
     requires_state_change: false,
     requires_submission: false,
+    completion_requirements: { download: false },
     allows_planner_shaped_result: false,
     allows_app_state_tool_evidence: false,
     read_scope: requestKind === 'execute' ? 'visible_page' : 'none',
@@ -62216,6 +63005,89 @@ test('reviewed plan edits preserve only explicitly approved submission metadata'
         text => text.replace(/Submission required:\s*yes/i, 'Submission required: no'),
       );
       assert.equal(negated.requiresSubmission, false, `${label}: negated verbose submission metadata was ignored`);
+    }
+  });
+});
+
+test('reviewed plan step edits clear stale download completion metadata', async () => {
+  await withPlannerBrowserGlobals(async () => {
+    for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
+      const runReviewedPlan = async (tabId, markdownMode, editPlan) => {
+        const provider = {
+          promptTier: 'full',
+          model: 'planner-download-edit-test',
+          name: 'planner-download-edit-test',
+        };
+        const agent = new AgentClass({ getActive: () => provider, getVisionProvider: async () => null });
+        agent.setPlanReviewSettings({ mode: 'always' });
+        agent._chatWithCostAllowance = async () => ({
+          content: plannerFixtureJson({
+            confidence: 0.99,
+            requires_state_change: false,
+            completion_requirements: { download: true },
+            summary: 'Download the report.',
+            steps: [{ id: '1', action: 'Download the report.', tools: ['download_files'] }],
+            localized: {
+              locale: 'en',
+              summary: 'Download the report.',
+              steps: [{ id: '1', action: 'Download the report.' }],
+              risks: [],
+            },
+          }),
+        });
+        agent._waitForPlanReview = async (_tabId, _planId, _plan, compactMarkdown, _onUpdate, verboseMarkdown) => ({
+          action: 'approve',
+          editedText: editPlan(markdownMode === 'verbose' ? verboseMarkdown : compactMarkdown),
+          markdownMode,
+        });
+        return agent._runPlannerGate(
+          tabId,
+          { role: 'user', content: 'Download the report.' },
+          () => {},
+          null,
+          null,
+          '',
+          { tabUrl: 'https://example.test/report', tabTitle: 'Report' },
+          'try',
+          'act',
+          { locale: 'en' },
+        );
+      };
+
+      const unchanged = await runReviewedPlan(label === 'chrome' ? 9242 : 9243, 'verbose', text => text);
+      assert.equal(unchanged.requiresDownload, true, `${label}: unchanged plan lost its download requirement`);
+      assert.equal(unchanged.requiresStateChange, true, `${label}: unchanged download stopped requiring a state change`);
+
+      const unrelated = await runReviewedPlan(
+        label === 'chrome' ? 9244 : 9245,
+        'verbose',
+        text => text.replace(/Confidence:\s*99%/i, 'Confidence: 98%'),
+      );
+      assert.equal(unrelated.requiresDownload, true, `${label}: unrelated edit dropped download metadata`);
+
+      const compactSteps = await runReviewedPlan(
+        label === 'chrome' ? 9246 : 9247,
+        'compact',
+        text => text.replace(/^1\. Download the report\..*$/im, '1. Find the report link.'),
+      );
+      assert.equal(compactSteps.requiresDownload, false, `${label}: compact step edit retained stale download metadata`);
+      assert.equal(compactSteps.requiresStateChange, false, `${label}: compact step edit retained a download-only mutation requirement`);
+
+      const verboseSteps = await runReviewedPlan(
+        label === 'chrome' ? 9248 : 9249,
+        'verbose',
+        text => text.replace(/^1\. Download the report\..*$/im, '1. Find the report link.'),
+      );
+      assert.equal(verboseSteps.requiresDownload, false, `${label}: verbose step edit retained stale download metadata`);
+      assert.equal(verboseSteps.requiresStateChange, false, `${label}: verbose step edit retained a download-only mutation requirement`);
+
+      const removed = await runReviewedPlan(
+        label === 'chrome' ? 9250 : 9251,
+        'verbose',
+        text => text.replace(/(?:^|\n)\s*-\s*Download required:.*(?=\n|$)/i, ''),
+      );
+      assert.equal(removed.requiresDownload, false, `${label}: removed download metadata stayed required`);
+      assert.equal(removed.requiresStateChange, false, `${label}: removed download metadata retained a download-only mutation requirement`);
     }
   });
 });
@@ -64031,6 +64903,7 @@ test('planner gate: trusted recommended media action skips planner and pins read
       );
 
       assert.equal(outcome.proceed, true, `${label} should proceed`);
+      assert.equal(outcome.requiresDownload, true, `${label} media fast path should require completed download evidence`);
       assert.equal(plannerCalls, 0, `${label} should skip the planner call`);
       assert.equal(agent.plannerFollowUpSkipTabs.has(tabId), false, `${label} should not arm the ordinary planner follow-up skip`);
 
@@ -64171,6 +65044,7 @@ test('planner gate: trusted WebBrain social promotion actions skip planner and p
         );
 
         assert.equal(outcome.proceed, true, `${label} ${fixture.name} should proceed`);
+        assert.equal(outcome.requiresDownload, false, `${label} ${fixture.name} should not gain a download requirement`);
         assert.equal(plannerCalls, 0, `${label} ${fixture.name} should skip the planner call`);
         const messages = agent.conversations.get(tabId);
         const idx = agent._findScratchpadIndex(messages);
@@ -74316,6 +75190,377 @@ test('run UI persistence compaction preserves acknowledged versus discarded boun
     assert.ok(compact.discardedBeforeSeq > compact.ackedSeq, `${build}: genuine persisted eviction did not create a replay-gap boundary`);
     const acknowledgedOnly = { ackedSeq: 42, discardedBeforeSeq: 0, truncatedBeforeSeq: 42 };
     assert.equal(journal.runUiDiscardedBeforeSeq(acknowledgedOnly), 0, `${build}: acknowledged events became a false replay gap`);
+  }
+});
+
+test('dedicated multimodal endpoints normalize bare OpenAI-compatible origins', () => {
+  for (const [label, compat] of [
+    ['chrome', ProviderCompatibilityCh],
+    ['firefox', ProviderCompatibilityFx],
+  ]) {
+    assert.equal(
+      compat.normalizeOpenAICompatibleBaseUrl(' http://127.0.0.1:1234/ '),
+      'http://127.0.0.1:1234/v1',
+      `${label}: bare LM Studio origin should gain /v1`,
+    );
+    assert.equal(
+      compat.normalizeOpenAICompatibleBaseUrl('http://127.0.0.1:1234/v1/'),
+      'http://127.0.0.1:1234/v1',
+      `${label}: explicit /v1 should not be duplicated`,
+    );
+    assert.equal(
+      compat.normalizeOpenAICompatibleBaseUrl('https://openrouter.ai/api/v1/'),
+      'https://openrouter.ai/api/v1',
+      `${label}: provider-specific API paths must be preserved`,
+    );
+
+    const controlled = compat.visionGenerationOptions(800);
+    assert.equal(controlled.maxTokens, 800);
+    assert.equal(controlled.extraBody.reasoning_effort, 'none');
+    assert.equal(controlled.extraBody.reasoning_tokens, 0);
+    assert.equal(controlled.extraBody.chat_template_kwargs.enable_thinking, false);
+    const legacy = compat.visionGenerationOptions(1600, { reasoningControl: false });
+    assert.equal(legacy.extraBody.reasoning_effort, undefined);
+    assert.equal(legacy.extraBody.reasoning_tokens, undefined);
+    assert.deepEqual(legacy.extraBody, {});
+    assert.equal(compat.unsupportedVisionGenerationControl(new Error('unknown parameter reasoning_tokens')), true);
+    assert.equal(compat.unsupportedVisionGenerationControl(new Error('unknown parameter chat_template_kwargs')), true);
+    assert.equal(compat.unsupportedVisionGenerationControl(new Error('unknown parameter response_format')), false);
+  }
+});
+
+test('OpenAI-compatible chat providers reject HTTP-200 error and non-completion payloads', async () => {
+  const originalFetch = globalThis.fetch;
+  const providers = [
+    ...[OpenAIProviderCh, OpenAIProviderFx].map(Provider => new Provider({
+      providerName: 'vision',
+      baseUrl: 'https://example.test/v1',
+      model: 'vision-model',
+    })),
+    ...[LlamaCppProviderCh, LlamaCppProviderFx].map(Provider => new Provider({
+      baseUrl: 'https://example.test/v1',
+      model: 'local-model',
+    })),
+    ...[AzureOpenAIProviderCh, AzureOpenAIProviderFx].map(Provider => new Provider({
+      baseUrl: 'https://example.openai.azure.com',
+      model: 'deployment',
+      apiVersion: '2024-10-21',
+    })),
+  ];
+  try {
+    for (const provider of providers) {
+      globalThis.fetch = async () => new Response(JSON.stringify({
+        error: { message: 'Unexpected endpoint or method.' },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      await assert.rejects(
+        provider.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 5 }),
+        /Unexpected endpoint or method/,
+      );
+
+      globalThis.fetch = async () => new Response(JSON.stringify({ object: 'list', data: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await assert.rejects(
+        provider.chat([{ role: 'user', content: 'Hi' }], { maxTokens: 5 }),
+        /no completion choice/,
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('dedicated vision descriptions suppress hidden reasoning and reuse one image for a bounded retry', async () => {
+  for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
+    const vision = {
+      config: { model: 'qwen/qwen3.5-9b', baseUrl: 'http://127.0.0.1:1234/v1' },
+    };
+    const agent = new AgentClass({ getVisionProvider: async () => vision });
+    const calls = [];
+    agent._chatWithCostAllowance = async (_provider, messages, options) => {
+      calls.push({ messages, options });
+      if (calls.length === 1) {
+        return {
+          content: '',
+          reasoningContent: 'The model used its output budget while thinking.',
+          raw: { choices: [{ finish_reason: 'length' }] },
+        };
+      }
+      return { content: '1) Page purpose: product reviews\n2) Visible content: review cards' };
+    };
+
+    const screenshot = 'data:image/png;base64,AA==';
+    const described = await agent._describeScreenshot(91, screenshot, 'protected_page');
+    assert.equal(described?.model, 'qwen/qwen3.5-9b', `${label}: retry should produce a usable description`);
+    assert.match(described?.text || '', /product reviews/);
+    assert.equal(calls.length, 2, `${label}: empty visible output should get one generation retry`);
+    assert.equal(calls[0].options.maxTokens, 800);
+    assert.equal(calls[1].options.maxTokens, 1600);
+    assert.equal(calls[0].options.extraBody.reasoning_effort, 'none');
+    assert.equal(calls[0].options.extraBody.reasoning_tokens, 0);
+    assert.equal(calls[1].messages[1].content[1].image_url.url, screenshot, `${label}: retry must reuse captured pixels`);
+  }
+});
+
+test('dedicated vision retries without unsupported LM Studio reasoning controls', async () => {
+  for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
+    const vision = {
+      config: { model: 'strict-vision', baseUrl: 'https://vision.example/v1' },
+    };
+    const agent = new AgentClass({ getVisionProvider: async () => vision });
+    const optionsSeen = [];
+    agent._chatWithCostAllowance = async (_provider, _messages, options) => {
+      optionsSeen.push(options);
+      if (optionsSeen.length === 1) throw new Error('Unknown parameter: reasoning_effort');
+      return { content: '1) Page purpose: protected store listing' };
+    };
+
+    const described = await agent._describeScreenshot(92, 'data:image/png;base64,AA==');
+    assert.match(described?.text || '', /protected store listing/, `${label}: strict provider fallback failed`);
+    assert.equal(optionsSeen.length, 2);
+    assert.equal(optionsSeen[1].maxTokens, 1600);
+    assert.equal(optionsSeen[1].extraBody.reasoning_effort, undefined);
+    assert.equal(optionsSeen[1].extraBody.reasoning_tokens, undefined);
+    assert.deepEqual(optionsSeen[1].extraBody, {});
+  }
+});
+
+test('multimodal connection tests exercise image and audio routes instead of only model listing', async () => {
+  const originalChrome = globalThis.chrome;
+  const originalBrowser = globalThis.browser;
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [label, ProviderManager] of [
+      ['chrome', ProviderManagerCh],
+      ['firefox', ProviderManagerFx],
+    ]) {
+      const storageApi = {
+        runtime: {
+          getURL: relativePath => `https://${label}.extension.test/${relativePath}`,
+        },
+        storage: {
+          local: {
+            get: async () => ({
+              transcriptionModel: {
+                baseUrl: 'http://127.0.0.1:1234',
+                model: 'whisper-local',
+                apiKey: '',
+              },
+            }),
+          },
+          onChanged: { addListener() {} },
+        },
+      };
+      globalThis.chrome = storageApi;
+      globalThis.browser = storageApi;
+      let endpointResponse = null;
+      let request = null;
+      globalThis.fetch = async (url, options) => {
+        const requestedUrl = String(url);
+        const assetPrefix = `https://${label}.extension.test/`;
+        if (requestedUrl.startsWith(assetPrefix)) {
+          const relativePath = requestedUrl.slice(assetPrefix.length);
+          return new Response(fs.readFileSync(path.join(ROOT, `src/${label}`, relativePath)), {
+            status: 200,
+          });
+        }
+        request = { url: requestedUrl, options };
+        return endpointResponse();
+      };
+
+      const visionCalls = [];
+      const visionManager = new ProviderManager();
+      visionManager.getVisionProvider = async () => ({
+        model: 'qwen/qwen3.5-9b',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        chat: async (messages, options) => {
+          visionCalls.push({ messages, options });
+          return { content: 'WB7' };
+        },
+      });
+      const visionResult = await visionManager.testVisionProvider();
+      assert.equal(visionResult.ok, true, `${label}: real vision probe should pass`);
+      assert.equal(visionCalls.length, 1);
+      assert.match(visionCalls[0].messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
+      assert.equal(visionCalls[0].options.extraBody.reasoning_tokens, 0);
+
+      visionManager.getVisionProvider = async () => ({
+        model: 'text-only-model',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        chat: async () => ({ content: 'I can respond without reading the image.' }),
+      });
+      const textOnlyResult = await visionManager.testVisionProvider();
+      assert.equal(textOnlyResult.ok, false, `${label}: a text-only response must not pass the vision probe`);
+      assert.match(textOnlyResult.error, /did not read the image probe correctly/);
+
+      endpointResponse = () => new Response(JSON.stringify({ text: '' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const result = await new ProviderManager().testTranscriptionProvider();
+      assert.equal(result.ok, true, `${label}: valid silent audio probe should pass`);
+      assert.equal(request.url, 'http://127.0.0.1:1234/v1/audio/transcriptions');
+      assert.equal(request.options.method, 'POST');
+      assert.ok(request.options.body instanceof FormData);
+      assert.equal(request.options.body.get('model'), 'whisper-local');
+      assert.ok(request.options.body.get('file') instanceof Blob);
+      assert.equal(
+        createHash('sha256')
+          .update(Buffer.from(await request.options.body.get('file').arrayBuffer()))
+          .digest('hex'),
+        '56d4af65701c26df20bd4021eda95b6e830348ce3a746086079fe89285548dc9',
+        `${label}: transcription request changed the silent WAV payload`,
+      );
+
+      endpointResponse = () => new Response(JSON.stringify({
+        error: 'Unexpected endpoint or method.',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      const rejected = await new ProviderManager().testTranscriptionProvider();
+      assert.equal(rejected.ok, false, `${label}: HTTP-200 endpoint errors must fail the connection test`);
+      assert.match(rejected.error, /Unexpected endpoint or method/);
+    }
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('transcription runtime normalizes a legacy bare override and surfaces HTTP-200 provider errors', async () => {
+  const originalChrome = globalThis.chrome;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: async () => ({
+            transcriptionModel: {
+              baseUrl: 'http://127.0.0.1:1234',
+              model: 'whisper-local',
+              apiKey: '',
+            },
+          }),
+        },
+      },
+    };
+    let requestedUrl = '';
+    globalThis.fetch = async url => {
+      requestedUrl = String(url);
+      return new Response(JSON.stringify({ error: { message: 'Audio route unavailable.' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    const result = await transcribeAudio(new Map(), new Blob(['audio'], { type: 'audio/webm' }));
+    assert.equal(requestedUrl, 'http://127.0.0.1:1234/v1/audio/transcriptions');
+    assert.equal(result.ok, false);
+    assert.match(result.error, /Audio route unavailable/);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('transcription runtime uses the Chrome offscreen fallback when direct fetch is blocked', async () => {
+  const originalChrome = globalThis.chrome;
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  let directAttempts = 0;
+  let proxiedRequest = null;
+  const bodyChunkMessages = [];
+  console.warn = () => {};
+  try {
+    globalThis.fetch = async () => {
+      directAttempts += 1;
+      throw new TypeError('Failed to fetch');
+    };
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: async () => ({
+            transcriptionModel: {
+              baseUrl: 'http://127.0.0.1:1234',
+              model: 'whisper-local',
+              apiKey: '',
+            },
+          }),
+        },
+      },
+      offscreen: {
+        async hasDocument() { return true; },
+      },
+      runtime: {
+        connect() {
+          const messageListeners = [];
+          const disconnectListeners = [];
+          return {
+            onMessage: { addListener(fn) { messageListeners.push(fn); } },
+            onDisconnect: { addListener(fn) { disconnectListeners.push(fn); } },
+            postMessage(msg) {
+              const emit = message => messageListeners.forEach(fn => fn(message));
+              if (msg.url) {
+                proxiedRequest = msg;
+                queueMicrotask(() => emit({ type: 'form-data-ready' }));
+                return;
+              }
+              if (msg.type === 'form-data-chunk') {
+                bodyChunkMessages.push(msg);
+                queueMicrotask(() => emit({
+                  type: 'form-data-chunk-ack',
+                  entryIndex: msg.entryIndex,
+                  sequence: msg.sequence,
+                }));
+                return;
+              }
+              if (msg.type === 'form-data-complete') {
+                queueMicrotask(() => {
+                emit({
+                  type: 'headers',
+                  ok: true,
+                  status: 200,
+                  contentType: 'application/json',
+                  hasBody: true,
+                });
+                emit({ type: 'chunk', text: '{"text":"fallback transcript"}' });
+                emit({ type: 'done' });
+                });
+              }
+            },
+            disconnect() { disconnectListeners.forEach(fn => fn()); },
+          };
+        },
+      },
+    };
+
+    const result = await transcribeAudio(
+      new Map(),
+      new Blob(['audio'], { type: 'audio/webm' }),
+      { filename: 'recording.webm' },
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.text, 'fallback transcript');
+    assert.equal(directAttempts, 1);
+    assert.equal(proxiedRequest.url, 'http://127.0.0.1:1234/v1/audio/transcriptions');
+    assert.equal(proxiedRequest.bodyType, 'form-data-chunked');
+    assert.equal(bodyChunkMessages.length, 1);
+    assert.deepEqual(proxiedRequest.formDataEntries.map(({ name, kind }) => ({ name, kind })), [
+      { name: 'file', kind: 'blob' },
+      { name: 'model', kind: 'text' },
+      { name: 'response_format', kind: 'text' },
+      { name: 'temperature', kind: 'text' },
+    ]);
+  } finally {
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+    if (originalFetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
   }
 });
 

@@ -36,6 +36,16 @@ import {
   parseOpenAiModelListContextWindow,
   shouldApplyDetectedContextWindow,
 } from './context-windows.js';
+import {
+  normalizeOpenAICompatibleBaseUrl,
+  openAiCompatiblePayloadError,
+  unsupportedVisionGenerationControl,
+  visionGenerationOptions,
+} from './provider-compatibility.js';
+import {
+  loadTranscriptionConnectionTestAudio,
+  loadVisionConnectionTestImage,
+} from './connection-test-assets.js';
 
 const WEBBRAIN_CLOUD_PROVIDER_ID = 'webbrain_cloud';
 const LOCAL_MODEL_LIST_PROVIDER_IDS = ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all'];
@@ -1008,7 +1018,7 @@ export class ProviderManager {
         category: 'cloud',
         label: 'Vision Model',
         providerName: 'vision',
-        baseUrl: visionModel.baseUrl,
+        baseUrl: normalizeOpenAICompatibleBaseUrl(visionModel.baseUrl),
         model: visionModel.model,
         apiKey: visionModel.apiKey || '',
         enabled: true,
@@ -1136,19 +1146,58 @@ export class ProviderManager {
   async testVisionProvider() {
     const provider = await this.getVisionProvider();
     if (!provider) return { ok: false, error: 'Vision model not configured' };
-    return provider.testConnection();
+    let imageDataUrl;
+    try {
+      imageDataUrl = await loadVisionConnectionTestImage(chrome.runtime);
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Read the three-character black code centered in the attached image. Reply with only that code.' },
+        { type: 'image_url', image_url: { url: imageDataUrl } },
+      ],
+    }];
+    let attempts = 1;
+    let reasoningControl = true;
+    let result;
+    try {
+      result = await provider.chat(messages, visionGenerationOptions(256, { reasoningControl }));
+    } catch (error) {
+      if (!unsupportedVisionGenerationControl(error)) return { ok: false, error: error.message };
+      reasoningControl = false;
+      attempts++;
+      try {
+        result = await provider.chat(messages, visionGenerationOptions(800, { reasoningControl }));
+      } catch (fallbackError) {
+        return { ok: false, error: fallbackError.message };
+      }
+    }
+    if (!String(result?.content || '').trim() && attempts === 1) {
+      attempts++;
+      try {
+        result = await provider.chat(messages, visionGenerationOptions(800, { reasoningControl }));
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    }
+    const probeText = String(result?.content || '').trim();
+    if (!probeText) {
+      return { ok: false, error: 'Vision model returned no visible description after the image probe.' };
+    }
+    if (!/\bWB7\b/i.test(probeText)) {
+      return { ok: false, error: 'Vision model responded but did not read the image probe correctly.' };
+    }
+    return { ok: true, model: provider.model, baseUrl: provider.baseUrl };
   }
 
   /**
    * Test the optional dedicated transcription provider's connection.
    *
-   * Hits <baseUrl>/models with the configured auth, which is the cheapest
-   * round-trip that validates "the endpoint is reachable AND the key works"
-   * without uploading actual audio. /v1/models is mandatory in the
-   * OpenAI-compatible spec, so every Whisper-hosting provider exposes it.
-   * If /models returns 200, /audio/transcriptions on the same base URL will
-   * accept calls (modulo per-model availability — that's checked when the
-   * actual transcription runs).
+   * Sends a tiny valid silent WAV to /audio/transcriptions. A /models check is
+   * insufficient because chat-only servers often expose the requested model
+   * while lacking a Whisper-compatible audio route entirely.
    */
   async testTranscriptionProvider() {
     let cfg;
@@ -1161,28 +1210,37 @@ export class ProviderManager {
     if (!cfg || !cfg.baseUrl || !cfg.model) {
       return { ok: false, error: 'Transcription model not configured (Base URL and Model are required).' };
     }
-    const baseUrl = cfg.baseUrl.replace(/\/$/, '');
-    const url = `${baseUrl}/models`;
-    const headers = { 'Accept': 'application/json' };
+    const baseUrl = normalizeOpenAICompatibleBaseUrl(cfg.baseUrl);
+    const url = `${baseUrl}/audio/transcriptions`;
+    const headers = {};
     if (cfg.apiKey) headers['Authorization'] = `Bearer ${cfg.apiKey}`;
+    const form = new FormData();
+    let audioBlob;
     try {
-      const res = await fetchWithFallback(url, { method: 'GET', headers });
+      audioBlob = await loadTranscriptionConnectionTestAudio(chrome.runtime);
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+    form.append('file', audioBlob, 'webbrain-connection-test.wav');
+    form.append('model', cfg.model);
+    form.append('response_format', 'json');
+    try {
+      const res = await fetchWithFallback(url, { method: 'POST', headers, body: form });
       if (!res.ok) {
         let body = '';
         try { body = (await res.text()).slice(0, 300); } catch {}
         return { ok: false, error: `HTTP ${res.status}: ${body || res.statusText}` };
       }
-      // Best-effort: confirm the user-specified model appears in the list.
-      // Not required for success — local servers (LM Studio, llama.cpp)
-      // sometimes return the loaded model under a different id than what
-      // the user typed, and that still works when actually transcribing.
       try {
         const data = await res.json();
-        const ids = this._extractModelIds('openai-compatible', data) || [];
-        const matches = ids.includes(cfg.model);
-        return { ok: true, model: cfg.model, modelListed: matches, modelCount: ids.length };
-      } catch {
-        return { ok: true, model: cfg.model };
+        const payloadError = openAiCompatiblePayloadError(data);
+        if (payloadError) return { ok: false, error: payloadError };
+        if (typeof data?.text !== 'string' && typeof data?.transcript !== 'string') {
+          return { ok: false, error: 'Transcription provider returned no transcript field.' };
+        }
+        return { ok: true, model: cfg.model, baseUrl };
+      } catch (error) {
+        return { ok: false, error: `Transcription provider returned invalid JSON: ${error.message}` };
       }
     } catch (e) {
       return { ok: false, error: e.message };

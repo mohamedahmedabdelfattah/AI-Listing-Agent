@@ -4,6 +4,44 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / browser manifest versions.
 
+## [29.0.2] - 2026-08-12
+
+### Changed
+- dist: rebuild submission zips for v29.0.1
+- fix: make store submission code reviewable
+
+## [29.0.1] - 2026-08-11
+
+### Changed
+- dist: rebuild submission zips for v29.0.0
+- fix: refine settings control order
+- docs: add 29.0.0 changelog
+- 29.0.0
+- Clean up settings organization
+
+## [29.0.0] - 2026-08-12
+
+### Changed
+- Reorganized Settings to surface frequently used controls and group advanced options more clearly.
+
+## [28.2.3] - 2026-08-11
+
+### Changed
+- Add active provider filter
+
+## [28.2.2] - 2026-08-11
+
+### Changed
+- fix streaming multipart offscreen uploads
+- fix transcription runtime fallback transport
+- fix chrome multipart offscreen fallback
+- fix multimodal provider validation
+- Fix anchored accessibility pagination
+- Reset protected gallery state after URL reads
+- Fix planner retry error handling
+- Handle protected Chrome Web Store pages
+- Fix planner provider compatibility and Act fallback
+
 ## [28.2.1] - 2026-08-11
 
 ### Changed
