@@ -1,6 +1,6 @@
 # AI Listing Agent — MVP-1 Design
 
-**Status:** Draft v2 — updated after validated Dubizzle listing/source review
+**Status:** Draft v3 — reconciled against verified repo facts and the companion implementation plan
 **Scope:** MVP-1 slice of the AI Listing Agent (v7.0 master spec), scoped down to a single
 implementable vertical: Egyptian apartment-rental research on dubizzle Egypt (formerly "OLX
 Egypt" — the two merged; the live domain is `dubizzle.com.eg`).
@@ -102,33 +102,57 @@ convention of duplicating rather than sharing code between builds:
 
 ```
 src/<chrome|firefox>/src/agent/listing-agent/
-  mission.js         — mission parsing/validation (mandatory/preferred/exclusions)
-  detection.js        — collection + listing-boundary detection
-  extraction.js        — normalizes tool output into a canonical Listing object
+  mission.js           — mission parsing/validation (mandatory/preferred/exclusions)
+  filter-planner.js      — maps mission requirements to native site filters when safe (§4)
+  detection.js            — collection + listing-boundary detection
+  extraction.js             — normalizes tool output into a canonical Listing object (two-pass)
   evidence.js
-  requirements.js      — eligibility evaluation (PASS/FAIL/UNKNOWN)
+  requirements.js           — eligibility evaluation (PASS/FAIL/UNKNOWN_BLOCKED)
   ranking.js
   dedup.js
-  controller.js         — detect → extract → evaluate → rank → dedupe → persist → progress
-  persistence.js         — new IndexedDB store, sibling to trace/recorder.js (not an edit to it)
-  export.js               — pure JSON/CSV serializer, mirrors trace-export.js's pattern
-  research-command.js      — pure parser for the /research slash command, mirrors watch-command.js
+  progress.js                 — no-progress/termination-limit tracking, split out of controller.js
+  controller.js                 — filter → detect → extract → evaluate → rank → dedupe → persist
+  persistence.js                 — new IndexedDB store, sibling to trace/recorder.js (not an edit to it)
+  export.js                       — pure JSON/CSV serializer, mirrors trace-export.js's pattern
+  (research-command.js lives in src/<browser>/src/ui/, see below — it's UI-parsing, not domain logic)
 
 src/<chrome|firefox>/src/ui/
   listings.html, listings.js   — new full-page Listing Workspace, mirrors traces.html/traces.js
+  research-command.js           — pure parser for the /research slash command, mirrors watch-command.js
+```
+
+New merge-safety files (also zero merge risk, see §13.7/§13.8):
+
+```
+listing-agent-contract.json                  — machine-readable owned-paths/touchpoint/hook manifest
+test/listing-agent-contract.test.mjs           — asserts every owned path + touchpoint hook still exists
+test/listing-agent-merge-rehearsal.test.mjs     — rehearses `git merge upstream/main` in a disposable
+                                                   worktree (never touches the real working tree) and
+                                                   fails the build if the merge itself would conflict
 ```
 
 ### 2.2 Minimal, precedented touchpoints in existing files
 
+**Verified against the actual repo** (not just inferred by precedent):
+
 | File | Change | Precedent |
 |---|---|---|
-| `manifest.json` (Chrome + Firefox) | Register `listings.html` as a web-accessible resource | Same as existing `traces.html` entry |
-| `sidepanel.js` (or `settings.html`) | One new nav link to open the Listings page | Same as existing Traces link |
-| `sidepanel.js` slash-command registry | One new registry entry pointing at `research-command.js` | Same pattern as `/watch` → `watch-command.js` |
+| `settings.html` | Add a sibling `btn-open-listings` link next to the existing `btn-open-traces` link (confirmed at line 1334) | Same precedent as the existing Traces link |
+| `sidepanel.js` — `SLASH_COMMANDS` array (confirmed at line 582) and `parseSlashCommands` dispatcher (confirmed at line 7139) | One new registry entry + one dispatch branch for `/research`, pointing at `research-command.js` | Same pattern as `/watch` → `watch-command.js` (imported at line ~48) |
+
+**`manifest.json` is corrected to NOT-touched.** v1/v2 of this doc assumed `listings.html` would
+need registering as a `web_accessible_resource`, by analogy with `traces.html`. Checked
+directly against the repo: `web_accessible_resources` in `src/chrome/manifest.json` only lists
+`vendor/pdfjs/*` and `skills/*` — `traces.html` is **not** in it. That manifest key only
+matters for resources a content script or external web page loads; an extension's own
+settings-linked pages (`traces.html`, and by the same logic `listings.html`) don't need it.
+This removes a touchpoint entirely rather than adding one — one fewer file to keep in sync
+across upstream merges.
 
 ### 2.3 Explicitly not touched
 
-`tools.js`, `agent.js`, `adapters.js`, `scheduler.js`. Detection/extraction reuse *existing*
+`tools.js`, `agent.js`, `adapters.js`, `scheduler.js`, `manifest.json` (both builds, see §2.2).
+Detection/extraction reuse *existing*
 tools (`get_accessibility_tree`, `extract_data`, `read_page`, `scroll`, `wait_for_stable`)
 purely through orchestration logic in the new module tree — no new browser-interaction tool
 schemas are required for MVP-1, so the two files every new tool normally touches
@@ -822,3 +846,28 @@ activate project workspace
 → write Capability Gap & Implementation Plan
 → begin MVP-1 implementation
 ```
+
+### v3 — Reconciliation against verified repo facts (this revision)
+
+The companion `AI Listing Agent MVP-1 Implementation Plan` did its own reconnaissance against
+the real repo (specific line numbers for `sidepanel.js`'s `SLASH_COMMANDS`/`parseSlashCommands`
+and `settings.html`'s `btn-open-traces`). Those claims were checked directly against the
+cloned repo and are accurate. One correction fell out of that check:
+
+- **`manifest.json` is no longer a touchpoint.** v1/v2 assumed `listings.html` would need
+  registering in `web_accessible_resources`, by analogy with `traces.html`. Verified against
+  `src/chrome/manifest.json`: `traces.html` is **not** in that list — it doesn't need to be,
+  since that manifest key only governs resources a content script/web page loads, not an
+  extension's own settings-linked pages. §2.2/§2.3 are corrected accordingly. This *removes*
+  a touchpoint, so the fork-safety story got strictly smaller, not larger.
+- §2.1's file inventory now matches the implementation plan's actual module split
+  (`filter-planner.js` and `progress.js` as their own files, `research-command.js` moved to
+  `ui/` since it's UI-parsing, not domain logic).
+- The merge-safety mechanism in §2/§13 now names the actual artifacts (`listing-agent-
+  contract.json`, `test/listing-agent-contract.test.mjs`,
+  `test/listing-agent-merge-rehearsal.test.mjs`) instead of a single placeholder test file.
+- Stray citation-tool artifacts (literal `citeturn0view0`/`citeturn1view0` tokens) left over
+  from an earlier drafting pass were stripped from the prose.
+- No other substantive disagreement was found between this design doc, the implementation
+  plan, and the updated master spec's Appendix J (furnishing correctly demoted from mandatory
+  to a user-requested, mission-driven requirement in all three documents now).
