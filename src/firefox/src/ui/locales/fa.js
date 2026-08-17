@@ -1,5 +1,16 @@
 // Persian — translated from the canonical English locale.
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'باز کردن گفت‌وگوی چاپ بومی صفحهٔ فعلی',
+  'sp.print.error': 'گفت‌وگوی چاپ باز نشد: {msg}',
   'sp.streaming.fallback': 'جریان پاسخ قطع شد؛ این نوبت Ask بدون پخش جریانی دوباره امتحان می‌شود.',
   'sp.providers.no_setup_group': "بدون نیاز به راه اندازی",
   'sp.providers.no_setup': "بدون راه اندازی",
@@ -62,6 +73,7 @@ export default {
   'sp.btn.history': "تاریخچه چت",
   'sp.btn.settings': "تنظیمات",
   "sp.btn.clear": "مکالمه جدید",
+  'sp.btn.expand': 'باز کردن در پنجره جدید',
   'sp.btn.send': "ارسال کنید",
   'sp.chat.follow_response': 'دنبال کردن پاسخ',
   'sp.chat.jump_latest': 'رفتن به جدیدترین بخش',
@@ -133,6 +145,7 @@ export default {
   "sp.slash.teach": "اقدامات خود را به‌صورت گردش‌کار ذخیره‌شده ضبط کنید",
   'sp.slash.run_workflow': "یک گردش کار ذخیره شده توسط ID را اجرا کنید",
   'sp.workflows.run_prompt': "اجرای گردش کار ذخیره شده \"{name}\"",
+  "sp.workflows.standalone_unavailable": "این پنجرهٔ مستقل فقط برای حالت پرسش است. برای اجرای گردش‌کارهای ذخیره‌شده در حالت اقدام، WebBrain را در پنل کناری باز کنید.",
   'sp.workflows.parameters_for': "پارامترهای \"{name}\" را وارد کنید. مقادیر فقط برای این اجرا استفاده می شود.",
   'sp.workflows.parameter_required': "\"{name}\" مورد نیاز است.",
   'sp.slash.save_workflow': "آخرین اجرای موفق ثبت شده را ذخیره کنید",
@@ -323,6 +336,7 @@ export default {
   'sp.perm.verb.upload': "آپلود فایل به",
   'sp.perm.verb.record': "زبانه (و میکروفون) را روی آن ضبط کنید",
   'sp.perm.verb.schedule': "برای کارهای آینده برنامه ریزی کنید",
+  'sp.perm.verb.window': 'اندازه پنجره مرورگر را تغییر دهید در',
 
   'sp.step.details': "جزئیات",
   'sp.step.input_label': "ورودی",
@@ -516,6 +530,10 @@ export default {
   'st.display.search.placeholder': "تنظیمات عمومی را جستجو کنید",
   'st.display.search.empty': "تنظیمات عمومی مطابقت ندارد.",
   'st.display.advanced': "پیشرفته",
+  ...getApocalypseModeCopy('fa'),
+  ...getEmergencyBoxCopy('fa'),
+  'st.providers.webgpu_download.stopping': 'در حال توقف و حذف فایل‌ها…',
+  'st.providers.webgpu_download.stop': 'توقف و حذف',
   'st.display.help_improve.label': "به بهبود WebBrain کمک کنید",
   'st.display.help_improve.desc_html': "اجازه دهید تا تعاملات متن و ابزار Cloud واجد شرایط WebBrain حفظ شود و برای ارزیابی، بهبود، تنظیم دقیق و آموزش استفاده شود. به طور پیش فرض روشن است. با خاموش کردن این حالت به طور دائم از مکالمه فعلی انصراف داده می شود. روشن کردن مجدد آن برای مکالمه جدید بعدی اعمال می شود. عکس های صفحه و بایت های تصویر در پایگاه داده بهبود WebBrain حفظ نمی شوند. <u>درخواست‌های API مدل محلی و خود را بیاورید هرگز توسط WebBrain جمع‌آوری نمی‌شوند.</u> <a href=\"https://webbrain.one/privacy\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"color:var(--accent);\">سیاست حفظ حریم خصوصی →</a>",
   'st.display.clarify_timeout.label': "روشن کردن مهلت زمانی",
@@ -598,6 +616,12 @@ export default {
   'st.providers.search.empty': "هیچ ارائه دهنده ای با این جستجو و فیلتر مطابقت ندارد.",
   'st.providers.save': "ذخیره کنید",
   'st.providers.test': "تست اتصال",
+  'st.providers.duplicate': 'تکثیر',
+  'st.providers.duplicate_limit': 'فقط یک نسخهٔ تکراری مجاز است',
+  'st.providers.duplicate_unavailable': 'امکان تکثیر این ارائه‌دهنده وجود ندارد',
+  'st.providers.duplicate_inactive': 'پیش از تکثیر، این ارائه‌دهنده را ذخیره کنید',
+  'st.providers.remove_duplicate': 'حذف نسخهٔ تکراری',
+  'st.providers.remove_duplicate_confirm': 'این ارائه‌دهندهٔ تکراری و تنظیمات ذخیره‌شدهٔ آن حذف شود؟',
   'st.providers.set_active': "فعال را تنظیم کنید",
   'st.providers.active': "فعال",
   'st.providers.saved': "ذخیره شد!",
@@ -1016,4 +1040,5 @@ export default {
   "st.sync.confirm.reset": "کپی ابری رمزگذاری شده با راه‌اندازی فعلی WebBrain این دستگاه جایگزین شود؟",
   "st.sync.consent.legacy": "همگام سازی رمزگذاری شده روشن شود؟ WebBrain یک نسخه رمزگذاری شده سرتاسر از خاطرات، تکمیل خودکار نمایه و تنظیمات ارائه دهنده کلید API شما را به WebBrain Cloud منتقل می کند. سابقه گپ و ورود به سیستم OAuth همگام سازی نمی شوند.",
   "st.sync.consent.denied": "مجوز همگام‌سازی رمزگذاری شده داده نشد.",
+  'st.providers.webgpu_note.body': '{modelLink} بدون هیچ نقطهٔ پایانی API کاملاً در Chrome اجرا می‌شود. نخستین تولید حدود 4.85 GB دانلود می‌کند و آن را در مرورگر ذخیره می‌کند. آزمایش اتصال، محیط اجرایی بسته‌بندی‌شده و آداپتور سخت‌افزاری را بدون دانلود مدل بررسی می‌کند.',
 };

@@ -1,5 +1,16 @@
 // Hindi — translated from the canonical English locale.
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'वर्तमान पृष्ठ का मूल प्रिंट संवाद खोलें',
+  'sp.print.error': 'प्रिंट संवाद नहीं खुल सका: {msg}',
   'sp.streaming.fallback': 'प्रतिक्रिया स्ट्रीम बाधित हुई; इस Ask टर्न को बिना स्ट्रीमिंग के फिर से आज़माया जा रहा है।',
   'sp.providers.no_setup_group': "किसी सेटअप की आवश्यकता नहीं है",
   'sp.providers.no_setup': "कोई सेटअप नहीं",
@@ -62,6 +73,7 @@ export default {
   'sp.btn.history': "चैट इतिहास",
   'sp.btn.settings': "सेटिंग्स",
   "sp.btn.clear": "नई बातचीत",
+  'sp.btn.expand': 'नई विंडो में खोलें',
   'sp.btn.send': "भेजें",
   'sp.chat.follow_response': 'जवाब का अनुसरण करें',
   'sp.chat.jump_latest': 'नवीनतम पर जाएँ',
@@ -133,6 +145,7 @@ export default {
   "sp.slash.teach": "अपने कार्यों को सहेजे गए वर्कफ़्लो के रूप में रिकॉर्ड करें",
   'sp.slash.run_workflow': "आईडी द्वारा सहेजा गया वर्कफ़्लो चलाएँ",
   'sp.workflows.run_prompt': "सहेजे गए वर्कफ़्लो \"{name}\" चलाएँ",
+  "sp.workflows.standalone_unavailable": "यह स्वतंत्र विंडो केवल पूछें मोड के लिए है। सहेजे गए वर्कफ़्लो को क्रिया मोड में चलाने के लिए WebBrain को साइड पैनल में खोलें।",
   'sp.workflows.parameters_for': "\"{name}\" के लिए पैरामीटर दर्ज करें। मानों का उपयोग केवल इस रन के लिए किया जाता है।",
   'sp.workflows.parameter_required': "\"{name}\" आवश्यक है।",
   'sp.slash.save_workflow': "नवीनतम सफल रिकॉर्ड किए गए रन को सहेजें",
@@ -323,6 +336,7 @@ export default {
   'sp.perm.verb.upload': "पर एक फ़ाइल अपलोड करें",
   'sp.perm.verb.record': "टैब (और माइक्रोफ़ोन) को चालू रखें",
   'sp.perm.verb.schedule': "भविष्य के लिए कार्य शेड्यूल करें",
+  'sp.perm.verb.window': 'ब्राउज़र विंडो का आकार बदलें',
 
   'sp.step.details': "विवरण",
   'sp.step.input_label': "इनपुट",
@@ -516,6 +530,10 @@ export default {
   'st.display.search.placeholder': "सामान्य सेटिंग्स खोजें",
   'st.display.search.empty': "कोई सामान्य सेटिंग मेल नहीं खाती.",
   'st.display.advanced': "उन्नत",
+  ...getApocalypseModeCopy('hi'),
+  ...getEmergencyBoxCopy('hi'),
+  'st.providers.webgpu_download.stopping': 'रोका जा रहा है और फ़ाइलें हटाई जा रही हैं…',
+  'st.providers.webgpu_download.stop': 'रोकें और हटाएँ',
   'st.display.help_improve.label': "WebBrain को बेहतर बनाने में सहायता करें",
   'st.display.help_improve.desc_html': "योग्य WebBrain क्लाउड टेक्स्ट और टूल इंटरैक्शन को बनाए रखने और मूल्यांकन, सुधार, फाइन-ट्यूनिंग और प्रशिक्षण के लिए उपयोग करने की अनुमति दें। डिफ़ॉल्ट रूप से चालू. इसे बंद करने से वर्तमान वार्तालाप स्थायी रूप से बंद हो जाता है; इसे वापस चालू करना अगली नई बातचीत पर लागू होता है। स्क्रीनशॉट और छवि बाइट्स को WebBrain सुधार डेटाबेस में बरकरार नहीं रखा गया है। <u>स्थानीय-मॉडल और अपनी खुद की एपीआई अनुरोध WebBrain द्वारा कभी एकत्र नहीं किए जाते हैं।</u> <a href=\"https://webbrain.one/privacy\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"color:var(--accent);\">गोपनीयता नीति →</a>",
   'st.display.clarify_timeout.label': "टाइमआउट स्पष्ट करें",
@@ -598,6 +616,12 @@ export default {
   'st.providers.search.empty': "कोई भी प्रदाता इस खोज और फ़िल्टर से मेल नहीं खाता।",
   'st.providers.save': "सहेजें",
   'st.providers.test': "परीक्षण कनेक्शन",
+  'st.providers.duplicate': 'डुप्लिकेट करें',
+  'st.providers.duplicate_limit': 'केवल एक डुप्लिकेट की अनुमति है',
+  'st.providers.duplicate_unavailable': 'इस प्रदाता को डुप्लिकेट नहीं किया जा सकता',
+  'st.providers.duplicate_inactive': 'इस प्रदाता को डुप्लिकेट करने से पहले सहेजें',
+  'st.providers.remove_duplicate': 'डुप्लिकेट हटाएँ',
+  'st.providers.remove_duplicate_confirm': 'क्या इस डुप्लिकेट प्रदाता और इसकी सहेजी गई सेटिंग हटानी हैं?',
   'st.providers.set_active': "सक्रिय सेट करें",
   'st.providers.active': "सक्रिय",
   'st.providers.saved': "सहेजा गया!",
@@ -1016,4 +1040,5 @@ export default {
   "st.sync.confirm.reset": "क्या एन्क्रिप्टेड क्लाउड कॉपी को इस डिवाइस के मौजूदा WebBrain सेटअप से बदलना है?",
   "st.sync.consent.legacy": "एन्क्रिप्टेड सिंक चालू करें? WebBrain आपकी यादों, प्रोफ़ाइल ऑटोफ़िल और API-कुंजी प्रदाता सेटिंग्स की एंड-टू-एंड एन्क्रिप्टेड कॉपी WebBrain Cloud को भेजेगा। चैट इतिहास और OAuth साइन-इन सिंक नहीं किए जाते।",
   "st.sync.consent.denied": "एन्क्रिप्टेड सिंक अनुमति नहीं दी गई थी.",
+  'st.providers.webgpu_note.body': '{modelLink} बिना किसी API एंडपॉइंट के पूरी तरह Chrome में चलता है। पहली जनरेशन लगभग 4.85 GB डाउनलोड करती है और इसे ब्राउज़र में कैश करती है। कनेक्शन जाँच मॉडल डाउनलोड किए बिना पैकेज किए गए रनटाइम और हार्डवेयर अडैप्टर की जाँच करती है।',
 };

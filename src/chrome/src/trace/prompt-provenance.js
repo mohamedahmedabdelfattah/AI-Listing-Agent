@@ -19,6 +19,8 @@ function messageContentChars(content) {
 
 function systemPromptVariant(prompt) {
   const text = String(prompt || '');
+  if (text.startsWith("You are WebBrain's private on-device chat assistant")) return 'standalone_webgpu';
+  if (text.startsWith("You are WebBrain's standalone chat assistant")) return 'standalone_chat';
   if (text.startsWith('You are WebBrain, a helpful AI browser assistant running in Ask mode.')) return 'ask';
 
   let actTier = '';
@@ -36,7 +38,7 @@ function systemPromptVariant(prompt) {
 }
 
 function variantMode(variant) {
-  if (variant === 'ask') return 'ask';
+  if (variant === 'ask' || variant === 'standalone_chat' || variant === 'standalone_webgpu') return 'ask';
   if (variant.startsWith('act_')) return 'act';
   if (variant.startsWith('dev_')) return 'dev';
   return null;
@@ -78,6 +80,7 @@ export function buildPromptTraceProvenance(rawMessages, rawTools, runtimeMode = 
     ? String(runtimeMode).toLowerCase()
     : null;
   const envelope = runtimeEnvelope(messages);
+  const runtimeEnvelopeRequired = variant !== 'standalone_chat' && variant !== 'standalone_webgpu';
   const roleCounts = { system: 0, user: 0, assistant: 0, tool: 0, other: 0 };
   let messageChars = 0;
   for (const message of messages) {
@@ -97,9 +100,10 @@ export function buildPromptTraceProvenance(rawMessages, rawTools, runtimeMode = 
     messageRoleCounts: roleCounts,
     toolCount: tools.length,
     runtimeMode: expectedMode,
+    runtimeEnvelopeRequired,
     runtimeEnvelopeMode: envelope.mode,
     runtimeEnvelopeMutationToolsEnabled: envelope.mutationToolsEnabled,
-    runtimeEnvelopeMatches: expectedMode ? envelope.mode === expectedMode : null,
+    runtimeEnvelopeMatches: expectedMode && runtimeEnvelopeRequired ? envelope.mode === expectedMode : null,
     systemPromptMatchesRuntime: expectedMode && promptMode ? expectedMode === promptMode : null,
   };
 }

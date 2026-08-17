@@ -1,7 +1,18 @@
 // Korean (ko).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': '현재 페이지의 기본 인쇄 대화상자 열기',
+  'sp.print.error': '인쇄 대화상자를 열 수 없습니다: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': '응답 스트리밍이 중단되었습니다. 이 Ask 요청을 스트리밍 없이 다시 시도합니다.',
   'sp.providers.no_setup_group': '설정 필요 없음',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': '언어',
   'sp.btn.settings': '설정',
   "sp.btn.clear": "새 대화",
+  'sp.btn.expand': '새 창에서 열기',
   'sp.btn.send': '보내기',
   'sp.chat.follow_response': '답변 따라가기',
   'sp.chat.jump_latest': '최신으로 이동',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': '무료 일일 WebBrain Cloud 사용량이 포함되어 있습니다. 요청은 api.webbrain.one을 통해 처리됩니다. 기본적으로 할당량과 디버깅을 위한 메타데이터만 기록하며, 프롬프트 텍스트, 페이지 콘텐츠, 스크린샷, 모델 응답은 기록하지 않습니다. {privacyLink}. 더 많은 사용량이 필요하면 {subscribeLink}에서 구독하세요. 청구는 {accountLink}에서 관리하세요.',
   'st.providers.webbrain_note.privacy_link': '개인정보 처리방침',
   'st.providers.test': '연결 테스트',
+  'st.providers.duplicate': '복제',
+  'st.providers.duplicate_limit': '복제본은 하나만 만들 수 있습니다',
+  'st.providers.duplicate_unavailable': '이 공급자는 복제할 수 없습니다',
+  'st.providers.duplicate_inactive': '이 공급자를 복제하기 전에 저장하세요',
+  'st.providers.remove_duplicate': '복제본 삭제',
+  'st.providers.remove_duplicate_confirm': '이 복제 공급자와 저장된 설정을 삭제할까요?',
   'st.providers.set_active': '활성으로 설정',
   'st.providers.active': '활성',
   'st.providers.saved': '저장되었습니다!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': '스크래치패드가 지워졌습니다.',
   'sp.scratchpad.error': '스크래치패드를 사용할 수 없습니다: {msg}',
   'sp.perm.verb.schedule': '미래 작업 예약',
+  'sp.perm.verb.window': '브라우저 창 크기 조절',
   'tool.schedule_resume': '재개 예약 중',
   'tool.schedule_task': '작업 예약 중',
   'st.display.scheduled_tasks.label': '예약된 작업',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': '일반 설정 검색',
   'st.display.search.empty': '일치하는 일반 설정이 없습니다.',
   'st.display.advanced': '고급',
+  ...getApocalypseModeCopy('ko'),
+  ...getEmergencyBoxCopy('ko'),
+  'st.providers.webgpu_download.stopping': '중지하고 파일을 삭제하는 중…',
+  'st.providers.webgpu_download.stop': '중지 및 삭제',
   'st.display.clarify_timeout.label': '명확화 제한 시간',
   'st.display.clarify_timeout.desc': '명확화 질문에 대한 답변 대기 시간입니다. 시간이 지나면 첫 번째 옵션을 자동 선택합니다(옵션이 없으면 시간 초과). 0은 즉시(항상 자동 선택). 1200초 초과는 무제한(끔). 기본 60초. 권한 또는 양식 제출 확인에는 적용되지 않습니다.',
   'st.display.clarify_timeout.off': '끔',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "작업을 저장된 워크플로로 기록",
   "sp.slash.run_workflow": "ID로 저장된 워크플로 실행",
   "sp.workflows.run_prompt": "저장된 워크플로 “{name}” 실행",
+  "sp.workflows.standalone_unavailable": "이 독립 실행형 창은 질문 모드 전용입니다. 저장된 워크플로를 실행 모드로 실행하려면 사이드 패널에서 WebBrain을 여세요.",
   "sp.workflows.parameters_for": "“{name}”의 매개변수를 입력하세요. 값은 이번 실행에만 사용됩니다.",
   "sp.workflows.parameter_required": "“{name}”은(는) 필수입니다.",
   "sp.slash.save_workflow": "가장 최근에 성공한 기록 실행 저장",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "암호화된 클라우드 사본을 이 기기의 현재 WebBrain 설정으로 바꾸시겠습니까?",
   "st.sync.consent.legacy": "암호화된 동기화를 사용하시겠습니까? WebBrain은 추억, 프로필 자동 완성 및 API 키 제공자 설정의 엔드 투 엔드 암호화 사본을 WebBrain Cloud로 전송합니다. 채팅 기록과 OAuth 로그인은 동기화되지 않습니다.",
   "st.sync.consent.denied": "암호화된 동기화 권한이 부여되지 않았습니다.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

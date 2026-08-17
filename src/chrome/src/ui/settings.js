@@ -34,6 +34,7 @@ import {
 } from '../agent/capsolver-config.js';
 import {
   detectedCompatibilityPreset,
+  isNewOpenAIContractConfig,
   normalizeOpenAICompatibleBaseUrl,
   normalizeProviderCompatibility,
   parseProviderExtraBodyJson,
@@ -52,19 +53,25 @@ import {
 import { ADDITIONAL_PROVIDER_UI } from '../providers/provider-catalog.js';
 import { AUTO_VISION_PROVIDER_IDS, visionDetectionMatches } from '../providers/vision-capabilities.js';
 import { canonicalizeOllamaBaseUrl } from '../providers/context-windows.js';
+import {
+  WEBGPU_VISION_AUTO_SELECTED_KEY,
+  WEBGPU_VISION_ENABLED_KEY,
+} from '../providers/webgpu.js';
 import { AUTO_GROUP_TABS_KEY } from '../tab-group-preference.js';
 
 const VISION_UI_PROVIDER_IDS = new Set(['ollama', ...AUTO_VISION_PROVIDER_IDS]);
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '29.0.2';
+const EXT_VERSION = '32.1.0';
 
 const providersContainer = document.getElementById('providers');
 const displaySettings = document.getElementById('display-settings');
 const generalSearchInput = document.getElementById('input-general-search');
 const generalSearchEmpty = document.getElementById('general-search-empty');
 const advancedSettings = document.querySelector('.advanced-settings');
+const apocalypseModeLink = document.getElementById('apocalypse-mode-link');
+const apocalypseModeStatus = document.getElementById('apocalypse-mode-status');
 const verboseToggle = document.getElementById('toggle-verbose');
 const selectionShortcutToggle = document.getElementById('toggle-selection-shortcut');
 const autoGroupTabsToggle = document.getElementById('toggle-auto-group-tabs');
@@ -110,6 +117,9 @@ const visionBaseUrlInput = document.getElementById('vision-base-url');
 const visionApiKeyInput = document.getElementById('vision-api-key');
 const visionModelInput = document.getElementById('vision-model');
 const btnSaveVision = document.getElementById('btn-save-vision');
+const webgpuVisionOption = document.getElementById('webgpu-vision-option');
+const btnUseWebgpuVision = document.getElementById('btn-use-webgpu-vision');
+const visionEndpointFields = document.getElementById('vision-endpoint-fields');
 const skillNameInput = document.getElementById('skill-name');
 const skillUrlInput = document.getElementById('skill-url');
 const skillTextArea = document.getElementById('skill-text');
@@ -303,33 +313,40 @@ if (languageSelect) {
     renderSkills();
     renderPermissions();
     refreshProfileSyncState();
+    refreshApocalypseModeStatus();
   });
 }
+globalThis.addEventListener('focus', () => {
+  refreshApocalypseModeStatus();
+  loadVisionConfig().catch(() => {});
+});
 
 let providersData = {};
 // Unsaved custom-body text must survive provider-card/filter/search renders,
 // including temporarily invalid JSON while the user is still editing it.
 // Keep the raw UI draft separate from the last valid provider config.
 const providerCompatibilityJsonDrafts = new Map();
+const dirtyProviderIds = new Set();
 let activeProviderId = '';
 let providerActivationRequestId = 0;
 let requestedActiveProviderId = '';
+let currentVisionConfig = {};
+let webgpuVisionEnabled = false;
 
 if (globalThis.chrome?.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes.providers?.newValue) return;
-    const nextOllama = changes.providers?.newValue?.ollama;
-    if (nextOllama && providersData.ollama) {
-      providersData.ollama.visionDetection = nextOllama.visionDetection || null;
-      refreshOllamaVisionStatus();
-    }
-    for (const id of AUTO_VISION_PROVIDER_IDS) {
-      const next = changes.providers.newValue[id];
-      if (!next || !providersData[id]) continue;
+    if (area !== 'local') return;
+    if (changes[WEBGPU_VISION_ENABLED_KEY]) loadVisionConfig().catch(() => {});
+    if (!changes.providers?.newValue) return;
+    for (const [id, next] of Object.entries(changes.providers.newValue)) {
+      if (!providersData[id] || next.visionDetection === undefined) continue;
       // Background detection may finish while the settings page contains
       // unsaved drafts. Refresh only the detected result.
       providersData[id].visionDetection = next.visionDetection || null;
-      refreshVisionStatus(id);
+      const definitionId = providerDefinitionId(id);
+      if (VISION_UI_PROVIDER_IDS.has(definitionId)) {
+        refreshVisionStatus(id);
+      }
     }
   });
 }
@@ -630,6 +647,43 @@ let customSkills = [];
 let skillPreviewRequestId = 0;
 const DEFAULT_SKILL_IDS = new Set(DEFAULT_SKILL_SOURCES.map((source) => source.id));
 
+function formatArchiveBytes(value) {
+  const number = Math.max(0, Number(value) || 0);
+  if (number < 1024) return `${number} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let amount = number;
+  let unit = -1;
+  do { amount /= 1024; unit += 1; } while (amount >= 1024 && unit < units.length - 1);
+  return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${units[unit]}`;
+}
+
+async function refreshApocalypseModeStatus() {
+  if (!apocalypseModeStatus) return;
+  try {
+    const status = await sendToBackground('apocalypse_mode', { command: 'status' });
+    const enabled = status?.enabled === true;
+    const summary = enabled
+      ? t('st.display.apocalypse_mode.status.summary', {
+        count: Number(status.installedCount) || 0,
+        size: formatArchiveBytes(status.totalBytes),
+        policy: t(status.updatePolicy === 'automatic' ? 'ap.metric.automatic' : 'ap.metric.manual'),
+      })
+      : t('st.display.apocalypse_mode.status.off');
+    apocalypseModeStatus.textContent = summary;
+    if (apocalypseModeLink) {
+      apocalypseModeLink.dataset.enabled = String(enabled);
+      apocalypseModeLink.title = summary;
+    }
+  } catch {
+    const unavailable = t('st.display.apocalypse_mode.status.unavailable');
+    apocalypseModeStatus.textContent = unavailable;
+    if (apocalypseModeLink) {
+      delete apocalypseModeLink.dataset.enabled;
+      apocalypseModeLink.title = unavailable;
+    }
+  }
+}
+
 // --- Init ---
 
 async function init() {
@@ -731,11 +785,7 @@ async function init() {
   }
 
   // Load vision model config
-  const visionStored = await chrome.storage.local.get(['visionModel']);
-  const vision = visionStored.visionModel || {};
-  visionBaseUrlInput.value = vision.baseUrl || '';
-  visionApiKeyInput.value = vision.apiKey || '';
-  visionModelInput.value = vision.model || '';
+  await loadVisionConfig();
 
   // Load transcription service config. Same shape as visionModel; used by
   // recorder/host.js → transcribe.js when transcribing recorded audio.
@@ -763,6 +813,7 @@ async function init() {
   await initPermissionGateToggle();
   await renderPermissions();
   await initScreenshotRedactionToggle();
+  await refreshApocalypseModeStatus();
 
   // Load providers
   const res = await sendToBackground('get_providers');
@@ -1440,6 +1491,74 @@ if (scheduledConfirmToggle) {
 
 // --- Vision Model ---
 
+function isWebgpuVisionEnabled() {
+  return webgpuVisionEnabled;
+}
+
+function renderVisionConfig(config = {}, localEnabled = webgpuVisionEnabled) {
+  currentVisionConfig = config && typeof config === 'object' && config.type !== 'webgpu'
+    ? config
+    : {};
+  webgpuVisionEnabled = localEnabled === true;
+  const isWebgpu = isWebgpuVisionEnabled();
+  visionBaseUrlInput.value = currentVisionConfig.baseUrl || '';
+  visionApiKeyInput.value = currentVisionConfig.apiKey || '';
+  visionModelInput.value = currentVisionConfig.model || '';
+  webgpuVisionOption?.classList.toggle('enabled', isWebgpu);
+  btnUseWebgpuVision?.setAttribute('aria-pressed', String(isWebgpu));
+  if (btnUseWebgpuVision) {
+    const buttonKey = isWebgpu
+      ? 'st.vision.local.disable'
+      : 'st.vision.local.enable';
+    btnUseWebgpuVision.dataset.i18n = buttonKey;
+    btnUseWebgpuVision.textContent = t(buttonKey);
+  }
+  if (visionEndpointFields) visionEndpointFields.disabled = isWebgpu;
+  updateMultimodalDetectedProvider('vision');
+}
+
+async function saveVisionConfig(config) {
+  if (config && Object.keys(config).length) {
+    await chrome.storage.local.set({ visionModel: config });
+    renderVisionConfig(config, webgpuVisionEnabled);
+    return;
+  }
+  await chrome.storage.local.remove('visionModel');
+  renderVisionConfig({}, webgpuVisionEnabled);
+}
+
+async function loadVisionConfig() {
+  const stored = await chrome.storage.local.get(['visionModel', WEBGPU_VISION_ENABLED_KEY]);
+  let vision = stored.visionModel || {};
+  let localEnabled = stored[WEBGPU_VISION_ENABLED_KEY] === true;
+  if (vision?.type === 'webgpu') {
+    // Early PR builds stored the Chromium-only choice in the portable endpoint
+    // slot. Migrate that shape once so it cannot sync to Firefox again.
+    localEnabled = true;
+    vision = {};
+    await chrome.storage.local.set({ [WEBGPU_VISION_ENABLED_KEY]: true });
+    await chrome.storage.local.remove('visionModel');
+  }
+  renderVisionConfig(vision, localEnabled);
+}
+
+async function setWebgpuVisionEnabled(enabled) {
+  const nextEnabled = enabled === true;
+  if (nextEnabled) {
+    await chrome.storage.local.set({ [WEBGPU_VISION_ENABLED_KEY]: true });
+    await chrome.storage.local.remove(WEBGPU_VISION_AUTO_SELECTED_KEY);
+  } else {
+    // Release GPU allocations, but keep the browser-cached model download so
+    // re-enabling does not require another ~770 MB transfer.
+    await sendToBackground('dispose_webgpu_vision').catch(() => {});
+    await chrome.storage.local.remove([
+      WEBGPU_VISION_ENABLED_KEY,
+      WEBGPU_VISION_AUTO_SELECTED_KEY,
+    ]);
+  }
+  renderVisionConfig(currentVisionConfig, nextEnabled);
+}
+
 function updateMultimodalDetectedProvider(kind) {
   const baseInput = kind === 'vision' ? visionBaseUrlInput : transcriptionBaseUrlInput;
   const hint = document.getElementById(`${kind}-detected`);
@@ -1471,41 +1590,49 @@ function flashVisionResult(className, text) {
   setTimeout(() => resultEl.classList.remove('show'), 2000);
 }
 
+btnUseWebgpuVision?.addEventListener('click', async () => {
+  if (isWebgpuVisionEnabled()) {
+    await setWebgpuVisionEnabled(false);
+    flashVisionResult('ok', t('st.vision.cleared'));
+    return;
+  }
+  await setWebgpuVisionEnabled(true);
+  flashVisionResult('ok', t('st.vision.local.saved'));
+});
+
 btnSaveVision.addEventListener('click', async () => {
   const baseUrl = normalizeOpenAICompatibleBaseUrl(visionBaseUrlInput.value);
   const apiKey = visionApiKeyInput.value.trim();
   const model = visionModelInput.value.trim();
 
   if (!baseUrl && !apiKey && !model) {
-    await chrome.storage.local.remove('visionModel');
+    await saveVisionConfig(null);
     flashVisionResult('ok', t('st.vision.cleared'));
     return;
   }
 
-  await chrome.storage.local.set({
-    visionModel: { baseUrl, apiKey, model },
-  });
-  visionBaseUrlInput.value = baseUrl;
+  await saveVisionConfig({ type: 'openai', baseUrl, apiKey, model });
   flashVisionResult('ok', t('st.vision.saved'));
 });
 
 btnTestVision.addEventListener('click', async () => {
+  const isWebgpu = isWebgpuVisionEnabled();
   const baseUrl = normalizeOpenAICompatibleBaseUrl(visionBaseUrlInput.value);
   const apiKey = visionApiKeyInput.value.trim();
   const model = visionModelInput.value.trim();
 
-  if (!baseUrl || !model) {
+  if (!isWebgpu && (!baseUrl || !model)) {
     const resultEl = showVisionResult('fail', t('st.vision.fill_required'));
     setTimeout(() => resultEl.classList.remove('show'), 2500);
     return;
   }
 
-  await chrome.storage.local.set({
-    visionModel: { baseUrl, apiKey, model },
-  });
-  visionBaseUrlInput.value = baseUrl;
+  if (!isWebgpu) {
+    await saveVisionConfig({ type: 'openai', baseUrl, apiKey, model });
+  }
 
   showVisionResult('', t('st.vision.testing'), 'var(--text2)');
+  if (isWebgpu) visionTestResult.textContent = t('st.vision.local.testing');
 
   try {
     const res = await sendToBackground('test_vision_provider');
@@ -1520,11 +1647,12 @@ btnTestVision.addEventListener('click', async () => {
 });
 
 btnClearVision.addEventListener('click', async () => {
-  visionBaseUrlInput.value = '';
-  visionApiKeyInput.value = '';
-  visionModelInput.value = '';
-  updateMultimodalDetectedProvider('vision');
-  await chrome.storage.local.remove('visionModel');
+  if (isWebgpuVisionEnabled()) {
+    await setWebgpuVisionEnabled(false);
+    flashVisionResult('ok', t('st.vision.cleared'));
+    return;
+  }
+  await saveVisionConfig(null);
   flashVisionResult('ok', t('st.vision.cleared'));
 });
 
@@ -1649,7 +1777,32 @@ function renderProfileSyncState(state) {
   if (profileSyncStatus) profileSyncStatus.textContent = describeProfileSyncState(state || {});
 }
 async function refreshProfileSyncState() { const state = await sendToBackground('profile_sync_state').catch(e => ({ status: 'error', error: e.message })); renderProfileSyncState(state); return state; }
-async function reloadProfileSyncData() { const stored = await chrome.storage.local.get(['profileEnabled', 'profileText', 'visionModel', 'transcriptionModel']); if (profileEnabledToggle) profileEnabledToggle.checked = !!stored.profileEnabled; if (profileTextArea) profileTextArea.value = stored.profileText || ''; const vision = stored.visionModel || {}; visionBaseUrlInput.value = vision.baseUrl || ''; visionApiKeyInput.value = vision.apiKey || ''; visionModelInput.value = vision.model || ''; const transcription = stored.transcriptionModel || {}; if (transcriptionBaseUrlInput) transcriptionBaseUrlInput.value = transcription.baseUrl || ''; if (transcriptionApiKeyInput) transcriptionApiKeyInput.value = transcription.apiKey || ''; if (transcriptionModelInput) transcriptionModelInput.value = transcription.model || ''; updateMultimodalDetectedProvider('vision'); updateMultimodalDetectedProvider('transcription'); await loadUserMemorySettings(); const res = await sendToBackground('get_providers'); providersData = res.providers; activeProviderId = res.active; renderProviders(); }
+async function reloadProfileSyncData() {
+  const stored = await chrome.storage.local.get([
+    'profileEnabled',
+    'profileText',
+    'visionModel',
+    WEBGPU_VISION_ENABLED_KEY,
+    'transcriptionModel',
+  ]);
+  if (profileEnabledToggle) profileEnabledToggle.checked = !!stored.profileEnabled;
+  if (profileTextArea) profileTextArea.value = stored.profileText || '';
+  if (stored.visionModel?.type === 'webgpu') {
+    await loadVisionConfig();
+  } else {
+    renderVisionConfig(stored.visionModel || {}, stored[WEBGPU_VISION_ENABLED_KEY] === true);
+  }
+  const transcription = stored.transcriptionModel || {};
+  if (transcriptionBaseUrlInput) transcriptionBaseUrlInput.value = transcription.baseUrl || '';
+  if (transcriptionApiKeyInput) transcriptionApiKeyInput.value = transcription.apiKey || '';
+  if (transcriptionModelInput) transcriptionModelInput.value = transcription.model || '';
+  updateMultimodalDetectedProvider('transcription');
+  await loadUserMemorySettings();
+  const res = await sendToBackground('get_providers');
+  providersData = res.providers;
+  activeProviderId = res.active;
+  renderProviders();
+}
 function profileSyncButtonRestore(button, pendingLabel) {
   if (!button) return () => {};
   const previousDisabled = button.disabled;
@@ -2000,6 +2153,10 @@ const VISION_MODE_FIELD = {
 };
 const OLLAMA_VISION_MODE_FIELD = VISION_MODE_FIELD;
 
+function providerDefinitionId(id, config = providersData[id]) {
+  return String(config?.sourceProviderId || config?.duplicateOf || id || '');
+}
+
 function visionStatusKey(id, config) {
   if (!providerVisionDetectionMatches(id, config)) return 'st.provider.field.vision_pending';
   return config.visionDetection.supportsVision
@@ -2008,9 +2165,10 @@ function visionStatusKey(id, config) {
 }
 
 function refreshVisionStatus(id) {
-  if (!VISION_UI_PROVIDER_IDS.has(id)) return;
-  const hint = id === 'ollama'
-    ? document.querySelector('[data-ollama-vision-status]')
+  const definitionId = providerDefinitionId(id);
+  if (!VISION_UI_PROVIDER_IDS.has(definitionId)) return;
+  const hint = definitionId === 'ollama'
+    ? document.querySelector(`[data-ollama-vision-status="${id}"]`)
     : document.querySelector(`[data-vision-status="${id}"]`);
   if (!hint) return;
   const mode = document.querySelector(`select[data-provider="${id}"][data-key="visionMode"]`)?.value || 'auto';
@@ -2030,7 +2188,8 @@ function refreshOllamaVisionStatus() {
 }
 
 function providerVisionDetectionMatches(id, config, detection = config?.visionDetection) {
-  if (id !== 'ollama') return visionDetectionMatches(id, config, detection, { allowTransient: true });
+  const definitionId = providerDefinitionId(id, config);
+  if (definitionId !== 'ollama') return visionDetectionMatches(definitionId, config, detection, { allowTransient: true });
   const model = String(config?.model || '').trim();
   const baseUrl = canonicalizeOllamaBaseUrl(config?.baseUrl);
   return !!model && !!baseUrl
@@ -2118,7 +2277,7 @@ function providerApiKeyWarning(id, config) {
   const input = document.querySelector(`input[data-provider="${id}"][data-key="apiKey"]`);
   if (!input) return '';
   const apiKey = String(config.apiKey || '').trim();
-  const keyIsOptional = providersData[id]?.category === 'local';
+  const keyIsOptional = providersData[id]?.category === 'local' && config.requiresApiKey !== true;
   const looksInvalid = apiKey ? apiKey.length < MIN_API_KEY_LENGTH : !keyIsOptional;
   input.setAttribute('aria-invalid', looksInvalid ? 'true' : 'false');
   return looksInvalid ? t('st.providers.api_key_warning') : '';
@@ -2132,8 +2291,13 @@ function restoreProviderApiKeyWarnings() {
   }
 }
 
-function supportsProviderCompatibilitySettings(id, config = {}) {
+function supportsProviderCompatibilityControls(id, config = {}) {
   return id !== 'webbrain_cloud' && ['openai', 'llamacpp', 'azure_openai'].includes(config.type);
+}
+
+function supportsProviderCompatibilitySettings(id, config = {}) {
+  return supportsProviderCompatibilityControls(id, config)
+    || ['anthropic', 'anthropic_oauth', 'vertex_anthropic'].includes(config.type);
 }
 
 function providerExtraBodyText(value) {
@@ -2150,15 +2314,19 @@ function prettyCompatibilityValue(value) {
 
 function automaticTokenField(config) {
   if (shouldUseOpenAIResponsesApi(config)) return 'max_output_tokens';
-  const model = String(config.model || '').toLowerCase();
-  const isNewOfficialContract = config.type === 'openai'
-    && config.category !== 'local'
-    && config.providerName !== 'lmstudio'
-    && /^(gpt-5|gpt-4\.1|o1|o3|o4)/.test(model);
+  const isNewOfficialContract = config.type === 'openai' && isNewOpenAIContractConfig(config);
   return isNewOfficialContract ? 'max_completion_tokens' : 'max_tokens';
 }
 
 function compatibilitySummary(config) {
+  const extraCount = config.extraBody && typeof config.extraBody === 'object' && !Array.isArray(config.extraBody)
+    ? Object.keys(config.extraBody).length
+    : 0;
+  if (['anthropic', 'anthropic_oauth', 'vertex_anthropic'].includes(config.type)) {
+    return extraCount
+      ? t(extraCount === 1 ? 'st.providers.compat.summary_extra' : 'st.providers.compat.summary_extra_plural', { count: extraCount })
+      : t('st.providers.compat.provider_default');
+  }
   const compat = normalizeProviderCompatibility(config);
   const detected = detectedCompatibilityPreset(config);
   const preset = compat.preset === 'auto'
@@ -2171,9 +2339,6 @@ function compatibilitySummary(config) {
     ? prettyCompatibilityValue('system')
     : prettyCompatibilityValue(compat.systemPromptRole);
   const tokens = compat.maxTokensField === 'auto' ? automaticTokenField(config) : compat.maxTokensField;
-  const extraCount = config.extraBody && typeof config.extraBody === 'object' && !Array.isArray(config.extraBody)
-    ? Object.keys(config.extraBody).length
-    : 0;
   const extra = extraCount
     ? t(extraCount === 1 ? 'st.providers.compat.summary_extra' : 'st.providers.compat.summary_extra_plural', { count: extraCount })
     : '';
@@ -2214,6 +2379,7 @@ function refreshProviderCompatibilitySummary(id) {
 
 function renderProviderCompatibilitySettings(id, config) {
   if (!supportsProviderCompatibilitySettings(id, config)) return '';
+  const showCompatibilityControls = supportsProviderCompatibilityControls(id, config);
   const compat = normalizeProviderCompatibility(config);
   const extraBody = providerCompatibilityJsonDrafts.has(id)
     ? providerCompatibilityJsonDrafts.get(id)
@@ -2229,8 +2395,9 @@ function renderProviderCompatibilitySettings(id, config) {
         <span class="provider-compatibility-summary">${escapeHtml(compatibilitySummary(config))}</span>
       </summary>
       <div class="provider-compatibility-body">
-        <p>${escapeHtml(t('st.providers.compat.blurb'))}</p>
-        <div class="provider-compatibility-grid">
+        ${showCompatibilityControls ? `
+          <p>${escapeHtml(t('st.providers.compat.blurb'))}</p>
+          <div class="provider-compatibility-grid">
           <div class="field">
             <label>${escapeHtml(t('st.providers.compat.preset'))}</label>
             <select data-provider="${id}" data-key="compat.preset" data-type="select">
@@ -2255,7 +2422,8 @@ function renderProviderCompatibilitySettings(id, config) {
               ${options([['auto', valueLabel('auto')], ['max_tokens', 'max_tokens'], ['max_completion_tokens', 'max_completion_tokens']], compat.maxTokensField)}
             </select>
           </div>
-        </div>
+          </div>
+        ` : ''}
         <div class="field provider-compatibility-json">
           <label>${escapeHtml(t('st.providers.compat.extra_body'))}</label>
           <textarea data-provider="${id}" data-key="extraBody" data-type="json" spellcheck="false"
@@ -2405,6 +2573,16 @@ function renderProviders() {
         PROMPT_TIER_FIELD,
       ],
     },
+    local_openai_proxy: {
+      fields: [
+        { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://127.0.0.1:8317/v1' },
+        { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'required — use the proxy client API key' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'model exposed by the proxy' },
+        CONTEXT_WINDOW_FIELD,
+        { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
+        PROMPT_TIER_FIELD,
+      ],
+    },
     azure_openai: {
       fields: [
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://{resource}.openai.azure.com' },
@@ -2495,7 +2673,7 @@ function renderProviders() {
       fields: [
         { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'AIza...' },
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'gemini-3.1-pro',
-          suggestions: ['gemini-3.1-pro', 'gemini-3-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'] },
+          suggestions: ['gemini-3.1-pro', 'gemini-3.1-flash', 'gemini-3-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://generativelanguage.googleapis.com/v1beta/openai' },
         ...COST_ESTIMATE_FIELDS,
       ],
@@ -2515,7 +2693,7 @@ function renderProviders() {
       fields: [
         { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'API key' },
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'mistral-medium-3.5',
-          suggestions: ['mistral-medium-3.5', 'mistral-small-4', 'codestral-25.08', 'devstral-medium'] },
+          suggestions: ['mistral-medium-3.5', 'mistral-large-latest', 'mistral-small-4', 'codestral-25.08', 'devstral-medium'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.mistral.ai/v1' },
         ...COST_ESTIMATE_FIELDS,
       ],
@@ -2542,7 +2720,7 @@ function renderProviders() {
       fields: [
         { key: 'apiKey', labelKey: 'st.provider.field.api_key', type: 'password', placeholder: 'nvapi-...' },
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'nvidia/llama-3.3-nemotron-super-49b',
-          suggestions: ['nvidia/llama-3.3-nemotron-super-49b', 'nvidia/llama-3.1-nemotron-70b-instruct', 'nvidia/nemotron-nano-9b-v2', 'meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1'] },
+          suggestions: ['nvidia/llama-3.3-nemotron-super-49b', 'nvidia/llama-3.1-nemotron-70b-instruct', 'nvidia/nemotron-nano-9b-v2', 'meta/llama-3.3-70b-instruct', 'meta/llama-3.1-8b-instruct', 'deepseek-ai/deepseek-r1'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://integrate.api.nvidia.com/v1' },
         ...COST_ESTIMATE_FIELDS,
       ],
@@ -2658,7 +2836,7 @@ function renderProviders() {
 
   providersContainer.appendChild(renderProviderFilterBar());
 
-  let entries = Object.entries(providersData);
+  let entries = Object.entries(providersData).filter(([id]) => id !== 'webgpu');
   const providerQuery = normalizeGeneralSearchText(providerSearchQuery);
   if (providerQuery) {
     entries = entries
@@ -2674,7 +2852,8 @@ function renderProviders() {
   for (const [id, config] of entries) {
     const isSelected = id === activeProviderId;
     const isConfigured = id !== 'webbrain_cloud' && config.configured === true;
-    const fieldDefs = providerConfigs[id]?.fields || [];
+    const definitionId = providerDefinitionId(id, config);
+    const fieldDefs = providerConfigs[definitionId]?.fields || [];
 
     // Active is a strict status filter. Category filters keep the selected
     // provider visible so users never lose track of the provider in use.
@@ -2701,8 +2880,8 @@ function renderProviders() {
             <select data-provider="${id}" data-key="${field.key}" data-type="select">${optionsHTML}</select>
           </div>
         `;
-        if (VISION_UI_PROVIDER_IDS.has(id) && field.key === 'visionMode') {
-          const statusAttribute = id === 'ollama' ? 'data-ollama-vision-status' : `data-vision-status="${id}"`;
+        if (VISION_UI_PROVIDER_IDS.has(definitionId) && field.key === 'visionMode') {
+          const statusAttribute = definitionId === 'ollama' ? `data-ollama-vision-status="${id}"` : `data-vision-status="${id}"`;
           fieldsHTML += `<div class="field-hint" ${statusAttribute}${current === 'auto' ? '' : ' hidden'} style="margin:-4px 0 10px;font-size:12px;color:var(--text2);">${escapeHtml(t(visionStatusKey(id, config)))}</div>`;
         }
       } else if (field.type === 'checkbox') {
@@ -2718,10 +2897,11 @@ function renderProviders() {
         } else if (field.suggestions && field.key === 'model') {
         const rawVal = config[field.key] || '';
         const isCustom = rawVal && !field.suggestions.includes(rawVal);
-        const effectiveVal = rawVal || field.suggestions[0];
-        const selectVal = isCustom ? '__custom__' : effectiveVal;
-        const optionsHTML = field.suggestions
-          .map(s => `<option value="${escapeHtml(s)}"${s === selectVal ? ' selected' : ''}>${escapeHtml(s)}</option>`)
+        const isBlankDuplicate = config.isDuplicate && !rawVal;
+        const effectiveVal = rawVal || (isBlankDuplicate ? '' : field.suggestions[0]);
+        const selectVal = isBlankDuplicate ? '' : (isCustom ? '__custom__' : effectiveVal);
+        const optionsHTML = (isBlankDuplicate ? '<option value="" selected></option>' : '') + field.suggestions
+          .map(s => `<option value="${escapeHtml(s)}"${s === selectVal ? ' selected' : ''}>${escapeHtml(field.suggestionLabels?.[s] || s)}</option>`)
           .join('') +
           `<option value="__custom__"${isCustom ? ' selected' : ''}>${escapeHtml(t('st.provider.field.model_custom'))}</option>`;
         fieldsHTML += `
@@ -2734,8 +2914,8 @@ function renderProviders() {
           </div>
         `;
       } else {
-        const localModelProviders = ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all'];
-        const canLoadModels = localModelProviders.includes(id) && field.key === 'model';
+        const localModelProviders = ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy'];
+        const canLoadModels = localModelProviders.includes(definitionId) && field.key === 'model';
         const listAttr = canLoadModels ? `list="models-${id}"` : '';
         const datalistHTML = canLoadModels ? `<datalist id="models-${id}"></datalist>` : '';
         const loadedModelsDialogHTML = canLoadModels
@@ -2798,11 +2978,12 @@ function renderProviders() {
          </div>`;
     }
     const extensionOrigin = chrome.runtime.getURL('').replace(/\/$/, '');
-    const ollamaWarning = id === 'ollama'
+    const ollamaWarningTitleId = `ollama-warning-title-${id}`;
+    const ollamaWarning = definitionId === 'ollama'
       ? `<aside class="provider-warning provider-ollama-warning" role="note"
-                aria-labelledby="ollama-warning-title">
+                aria-labelledby="${ollamaWarningTitleId}">
            <div class="provider-warning-label">${escapeHtml(t('st.providers.ollama_warning.label'))}</div>
-           <strong class="provider-warning-title" id="ollama-warning-title">${escapeHtml(t('st.providers.ollama_warning.title'))}</strong>
+           <strong class="provider-warning-title" id="${ollamaWarningTitleId}">${escapeHtml(t('st.providers.ollama_warning.title'))}</strong>
            <p>${escapeHtml(t('st.providers.ollama_warning.body'))}</p>
            <p>${escapeHtml(t('st.providers.ollama_warning.restart'))}</p>
            <pre><code>OLLAMA_ORIGINS="${escapeHtml(extensionOrigin)}" ollama serve</code></pre>
@@ -2812,6 +2993,11 @@ function renderProviders() {
          </aside>`
       : '';
     const compatibilitySettings = renderProviderCompatibilitySettings(id, config);
+    const duplicateDisabledKey = config.hasDuplicate
+      ? 'st.providers.duplicate_limit'
+      : (!config.canDuplicate
+        ? 'st.providers.duplicate_unavailable'
+        : ((!isConfigured || dirtyProviderIds.has(id)) ? 'st.providers.duplicate_inactive' : ''));
 
     const body = `
       ${fieldsHTML}
@@ -2823,6 +3009,9 @@ function renderProviders() {
         <button class="btn-secondary btn-test" data-provider="${id}">${escapeHtml(t('st.providers.test'))}</button>
         ${billingButton}
         ${!isSelected ? `<button class="btn-secondary btn-activate" data-provider="${id}">${escapeHtml(t('st.providers.select_for_chat'))}</button>` : ''}
+        ${config.isDuplicate
+          ? `<button class="btn-secondary btn-remove-duplicate" data-provider="${id}">${escapeHtml(t('st.providers.remove_duplicate'))}</button>`
+          : `<button class="btn-secondary btn-duplicate" data-provider="${id}"${duplicateDisabledKey ? ` disabled title="${escapeHtml(t(duplicateDisabledKey))}"` : ''}>${escapeHtml(t('st.providers.duplicate'))}</button>`}
       </div>
       <div class="test-result" id="test-${id}"></div>
     `;
@@ -2853,6 +3042,16 @@ function renderProviders() {
   document.querySelectorAll('.btn-activate').forEach(btn => {
     btn.addEventListener('click', () => activateProvider(btn.dataset.provider));
   });
+  document.querySelectorAll('.btn-duplicate').forEach(btn => {
+    btn.addEventListener('click', () => duplicateProvider(btn.dataset.provider));
+  });
+  document.querySelectorAll('input[data-provider], select[data-provider], textarea[data-provider]').forEach(input => {
+    const eventName = input.tagName === 'SELECT' ? 'change' : 'input';
+    input.addEventListener(eventName, () => markProviderDirty(input.dataset.provider));
+  });
+  document.querySelectorAll('.btn-remove-duplicate').forEach(btn => {
+    btn.addEventListener('click', () => removeDuplicateProvider(btn.dataset.provider));
+  });
   document.querySelectorAll('.btn-load-models').forEach(btn => {
     btn.addEventListener('click', () => loadProviderModels(btn.dataset.provider));
   });
@@ -2876,6 +3075,7 @@ function renderProviders() {
         input.style.display = 'none';
         input.value = sel.value;
       }
+      markProviderDirty(providerId);
       refreshProviderCompatibilitySummary(providerId);
       refreshVisionStatus(providerId);
     });
@@ -2897,7 +3097,7 @@ function renderProviders() {
     input.addEventListener('input', () => {
       refreshProviderCompatibilitySummary(input.dataset.provider);
       refreshVisionStatus(input.dataset.provider);
-      if (input.dataset.provider === 'ollama') refreshOllamaVisionStatus();
+      if (providerDefinitionId(input.dataset.provider) === 'ollama') refreshVisionStatus(input.dataset.provider);
     });
   });
   document.querySelectorAll('.btn-reset-compatibility').forEach((button) => {
@@ -2910,6 +3110,7 @@ function renderProviders() {
         textarea.value = '';
         providerCompatibilityJsonDrafts.set(id, '');
       }
+      markProviderDirty(id);
       refreshProviderCompatibilitySummary(id);
     });
   });
@@ -2964,6 +3165,7 @@ function renderProviderFilterBar() {
     { key: 'router', labelKey: 'st.providers.filter.router' },
   ];
   const filterCounts = Object.entries(providersData).reduce((counts, [id, config]) => {
+    if (id === 'webgpu') return counts;
     counts.all += 1;
     if (providerIsActive(id, config)) counts.active += 1;
     const category = config.category || 'cloud';
@@ -3055,7 +3257,7 @@ function wrapCollapsibleCard(id, config, isSelected, isConfigured, bodyHtml) {
   header.innerHTML = `
     <div class="provider-header-left">
       <span class="provider-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
-      ${providerIconHtml(id, label)}
+      ${providerIconHtml(providerDefinitionId(id, config), label)}
       <span class="provider-name">${escapeHtml(label)}</span>
       <span class="provider-type">${escapeHtml(config.type)}</span>
       ${config.category ? `<span class="provider-category-badge provider-category-${escapeHtml(config.category)}">${escapeHtml(config.category)}</span>` : ''}
@@ -3091,9 +3293,15 @@ function providerIsActive(id, config) {
   return id !== 'webbrain_cloud' && config?.configured === true;
 }
 
+function markProviderDirty(id) {
+  if (!id || !providersData[id]) return;
+  dirtyProviderIds.add(id);
+  refreshProviderCardStatus(id);
+}
+
 function refreshActiveProviderFilterCount() {
   const count = Object.entries(providersData)
-    .filter(([id, config]) => providerIsActive(id, config))
+    .filter(([id, config]) => id !== 'webgpu' && providerIsActive(id, config))
     .length;
   const countEl = document.querySelector('.provider-filter-pill[data-filter="active"] .provider-filter-count');
   if (countEl) countEl.textContent = String(count);
@@ -3244,7 +3452,7 @@ async function saveProvider(id, { showFlash = true, markConfigured = true } = {}
   if (providersData[id]) {
     const priorVisionDetection = providersData[id].visionDetection;
     Object.assign(providersData[id], config);
-    if (VISION_UI_PROVIDER_IDS.has(id) && (
+    if (VISION_UI_PROVIDER_IDS.has(providerDefinitionId(id, providersData[id])) && (
       providersData[id].visionMode !== 'auto'
       || !providerVisionDetectionMatches(id, providersData[id], priorVisionDetection)
     )) {
@@ -3252,6 +3460,7 @@ async function saveProvider(id, { showFlash = true, markConfigured = true } = {}
     }
     if (markConfigured) providersData[id].configured = id !== 'webbrain_cloud';
   }
+  if (markConfigured) dirtyProviderIds.delete(id);
   refreshProviderCardStatus(id);
   refreshVisionStatus(id);
 
@@ -3275,6 +3484,13 @@ function refreshProviderCardStatus(id) {
   const isSelected = id === activeProviderId;
   card.classList.toggle('configured', isConfigured);
   card.classList.toggle('selected', isSelected);
+  const duplicateButton = card.querySelector('.btn-duplicate');
+  if (duplicateButton && providersData[id]?.canDuplicate && !providersData[id]?.hasDuplicate) {
+    const requiresSave = !isConfigured || dirtyProviderIds.has(id);
+    duplicateButton.disabled = requiresSave;
+    if (!requiresSave) duplicateButton.removeAttribute('title');
+    else duplicateButton.title = t('st.providers.duplicate_inactive');
+  }
   const badges = card.querySelector('.provider-status-badges');
   if (!badges) return;
   badges.innerHTML = `
@@ -3334,6 +3550,65 @@ function syncInputsIntoProvidersData() {
     }
     setProviderConfigValue(providersData[id], key, providerInputValue(input));
   });
+}
+
+const PROVIDER_REFRESH_MANAGED_KEYS = new Set([
+  'id',
+  'type',
+  'category',
+  'configured',
+  'duplicateOf',
+  'sourceProviderId',
+  'isDuplicate',
+  'hasDuplicate',
+  'canDuplicate',
+  'visionDetection',
+]);
+
+function restoreProviderDrafts(drafts) {
+  for (const [providerId, draft] of Object.entries(drafts || {})) {
+    const refreshed = providersData[providerId];
+    if (!refreshed || !draft) continue;
+    for (const [key, value] of Object.entries(draft)) {
+      if (!PROVIDER_REFRESH_MANAGED_KEYS.has(key)) refreshed[key] = value;
+    }
+  }
+}
+
+async function duplicateProvider(id) {
+  if (!providerIsActive(id, providersData[id]) || dirtyProviderIds.has(id)) return;
+  try {
+    syncInputsIntoProvidersData();
+    const providerDrafts = providersData;
+    const created = await sendToBackground('duplicate_provider', { providerId: id });
+    const refreshed = await sendToBackground('get_providers');
+    providersData = refreshed.providers;
+    activeProviderId = refreshed.active;
+    restoreProviderDrafts(providerDrafts);
+    expandedProviders.add(created.providerId);
+    renderProviders();
+  } catch (error) {
+    setProviderTestResult(id, 'fail', t('st.providers.failed', { error: error.message }));
+  }
+}
+
+async function removeDuplicateProvider(id) {
+  if (!window.confirm(t('st.providers.remove_duplicate_confirm'))) return;
+  try {
+    syncInputsIntoProvidersData();
+    const providerDrafts = providersData;
+    await sendToBackground('remove_duplicate_provider', { providerId: id });
+    const refreshed = await sendToBackground('get_providers');
+    providersData = refreshed.providers;
+    activeProviderId = refreshed.active;
+    restoreProviderDrafts(providerDrafts);
+    expandedProviders.delete(id);
+    providerCompatibilityJsonDrafts.delete(id);
+    dirtyProviderIds.delete(id);
+    renderProviders();
+  } catch (error) {
+    setProviderTestResult(id, 'fail', t('st.providers.failed', { error: error.message }));
+  }
 }
 
 async function activateProvider(id) {

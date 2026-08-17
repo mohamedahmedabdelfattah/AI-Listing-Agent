@@ -1,7 +1,18 @@
 ﻿// German (de).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Nativen Druckdialog der aktuellen Seite öffnen',
+  'sp.print.error': 'Druckdialog konnte nicht geöffnet werden: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Der Antwortstream wurde unterbrochen; dieser Ask-Durchgang wird ohne Streaming erneut versucht.',
   'sp.providers.no_setup_group': 'Keine Einrichtung erforderlich',
@@ -62,6 +73,7 @@ export default {
   'sp.btn.history': 'Chat-Verlauf',
   'sp.btn.settings': 'Einstellungen',
   "sp.btn.clear": "Neues Gespräch",
+  'sp.btn.expand': 'In neuem Fenster öffnen',
   'sp.btn.send': 'Senden',
   'sp.chat.follow_response': 'Antwort folgen',
   'sp.chat.jump_latest': 'Zum neuesten',
@@ -165,6 +177,7 @@ export default {
   'sp.slash.import_config': 'WebBrain-Konfigurations-Snapshot als JSON importieren',
   'sp.slash.import_config_file': 'WebBrain-Konfigurations-JSON-Datei auswählen',
   'sp.workflows.run_prompt': 'Gespeicherten Workflow „{name}" ausführen',
+  "sp.workflows.standalone_unavailable": "Dieses eigenständige Fenster ist nur für den Fragen-Modus vorgesehen. Öffnen Sie WebBrain in der Seitenleiste, um gespeicherte Workflows im Handeln-Modus auszuführen.",
   'sp.workflows.parameters_for': 'Parameter für „{name}" eingeben. Die Werte werden nur für diesen Durchlauf verwendet.',
   'sp.workflows.parameter_required': '„{name}" ist erforderlich.',
   'sp.recommended.title': 'Vorgeschlagene Aktionen',
@@ -333,6 +346,7 @@ export default {
   'sp.perm.verb.upload': 'Datei hochladen zu',
   'sp.perm.verb.record': 'Tab (und Mikrofon) aufnehmen auf',
   'sp.perm.verb.schedule': 'zukünftige Aufgaben planen für',
+  'sp.perm.verb.window': 'die Größe des Browserfensters ändern auf',
   'sp.help.shortcuts_html': '<strong>Tastenkürzel</strong><br><code>Ctrl/Cmd+/</code> — Eingabefeld fokussieren<br><code>Ctrl/Cmd+Shift+A</code> — Zum Fragen-Modus wechseln<br><code>Ctrl/Cmd+Shift+X</code> — Zum Handeln-Modus wechseln<br><code>Ctrl/Cmd+Shift+D</code> — Zum Dev-Modus wechseln<br><code>Escape</code> — Aktiven Durchlauf stoppen<br><code>Escape</code> zweimal — Aktive Aufnahme stoppen',
   'sp.compact.nothing_to_compact': 'Noch nichts zu kompaktieren — es gibt nicht genügend älteren Kontext.',
   'sp.compact.busy': 'Kompaktierung nicht möglich, während ein Durchlauf läuft — warten Sie auf dessen Abschluss.',
@@ -511,6 +525,10 @@ export default {
   'st.display.search.placeholder': 'Allgemeine Einstellungen durchsuchen',
   'st.display.search.empty': 'Keine passenden allgemeinen Einstellungen.',
   'st.display.advanced': 'Erweitert',
+  ...getApocalypseModeCopy('de'),
+  ...getEmergencyBoxCopy('de'),
+  'st.providers.webgpu_download.stopping': 'Download wird gestoppt und Dateien werden entfernt…',
+  'st.providers.webgpu_download.stop': 'Stoppen und entfernen',
   'st.display.help_improve.label': 'Bei der Verbesserung von WebBrain helfen',
   'st.display.help_improve.desc_html': 'Ermöglichen Sie, dass geeignete WebBrain Cloud-Text- und Tool-Interaktionen gespeichert und für Auswertung, Verbesserung, Feinabstimmung und Training verwendet werden. Standardmäßig aktiviert. Wenn Sie dies deaktivieren, wird die aktuelle Unterhaltung dauerhaft ausgeschlossen; eine erneute Aktivierung gilt ab der nächsten neuen Unterhaltung. Screenshots und Bilddaten werden nicht in der WebBrain-Verbesserungsdatenbank gespeichert. <u>Anfragen an lokale Modelle und mit eigenen APIs werden niemals von WebBrain erfasst.</u> <a href="https://webbrain.one/privacy" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Datenschutzrichtlinie →</a>',
   'st.display.clarify_timeout.label': 'Zeitlimit für Klärungsfragen',
@@ -593,6 +611,12 @@ export default {
   'st.providers.search.empty': 'Kein Anbieter passt zu dieser Suche und diesem Filter.',
   'st.providers.save': 'Speichern',
   'st.providers.test': 'Verbindung testen',
+  'st.providers.duplicate': 'Duplizieren',
+  'st.providers.duplicate_limit': 'Es ist nur ein Duplikat zulässig',
+  'st.providers.duplicate_unavailable': 'Dieser Anbieter kann nicht dupliziert werden',
+  'st.providers.duplicate_inactive': 'Speichern Sie diesen Anbieter, bevor Sie ihn duplizieren',
+  'st.providers.remove_duplicate': 'Duplikat entfernen',
+  'st.providers.remove_duplicate_confirm': 'Diesen duplizierten Anbieter und seine gespeicherte Konfiguration entfernen?',
   'st.providers.set_active': 'Als aktiv setzen',
   'st.providers.active': 'AKTIV',
   'st.providers.saved': 'Gespeichert!',
@@ -989,4 +1013,5 @@ export default {
   "st.sync.confirm.reset": "Die verschlüsselte Cloud-Kopie durch das aktuelle WebBrain-Setup dieses Geräts ersetzen?",
   "st.sync.consent.legacy": "Verschlüsselte Synchronisierung aktivieren? WebBrain überträgt eine Ende-zu-Ende-verschlüsselte Kopie Ihrer Erinnerungen, des automatischen Ausfüllens Ihres Profils und der Einstellungen des API-Schlüsselanbieters an die WebBrain Cloud. Chatverlauf und OAuth-Anmeldungen werden nicht synchronisiert.",
   "st.sync.consent.denied": "Die Berechtigung zur verschlüsselten Synchronisierung wurde nicht erteilt.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

@@ -1,7 +1,18 @@
 // Turkish (tr).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Geçerli sayfanın yerel yazdırma iletişim kutusunu aç',
+  'sp.print.error': 'Yazdırma iletişim kutusu açılamadı: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Yanıt akışı kesildi; bu Ask turu akış olmadan yeniden deneniyor.',
   'sp.providers.no_setup_group': 'Kurulum gerektirmez',
@@ -149,6 +160,7 @@ export default {
   'sp.btn.history': 'Sohbet geçmişi',
   'sp.btn.settings': 'Ayarlar',
   "sp.btn.clear": "Yeni konuşma",
+  'sp.btn.expand': 'Yeni pencerede aç',
   'sp.btn.send': 'Gönder',
   'sp.chat.follow_response': 'Yanıtı takip et',
   'sp.chat.jump_latest': 'En yeniye git',
@@ -292,6 +304,12 @@ export default {
   'st.providers.webbrain_note.body': 'Ücretsiz günlük WebBrain Cloud kullanımı dahildir. İstekler api.webbrain.one üzerinden geçer; varsayılan olarak kota ve hata ayıklama için meta verileri kaydederiz; istem metnini, sayfa içeriğini, ekran görüntülerini veya model yanıtlarını kaydetmeyiz. {privacyLink}. Daha fazla kullanım için {subscribeLink} adresinden abone olun. Faturalandırmayı {accountLink} adresinden yönetin.',
   'st.providers.webbrain_note.privacy_link': 'Gizlilik politikası',
   'st.providers.test': 'Bağlantıyı sına',
+  'st.providers.duplicate': 'Çoğalt',
+  'st.providers.duplicate_limit': 'Yalnızca bir kopyaya izin verilir',
+  'st.providers.duplicate_unavailable': 'Bu sağlayıcı çoğaltılamaz',
+  'st.providers.duplicate_inactive': 'Çoğaltmadan önce bu sağlayıcıyı kaydedin',
+  'st.providers.remove_duplicate': 'Kopyayı kaldır',
+  'st.providers.remove_duplicate_confirm': 'Bu çoğaltılmış sağlayıcı ve kayıtlı yapılandırması kaldırılsın mı?',
   'st.providers.set_active': 'Etkinleştir',
   'st.providers.active': 'ETKİN',
   'st.providers.saved': 'Kaydedildi!',
@@ -609,6 +627,7 @@ export default {
   'sp.scratchpad.cleared': 'Not defteri temizlendi.',
   'sp.scratchpad.error': 'Not defterine erişilemiyor: {msg}',
   'sp.perm.verb.schedule': 'gelecekteki çalışmayı zamanlamak için',
+  'sp.perm.verb.window': 'tarayıcı penceresinin boyutunu değiştirmek',
   'tool.schedule_resume': 'Devam zamanlama',
   'tool.schedule_task': 'Görev zamanlama',
   'st.display.scheduled_tasks.label': 'Zamanlanmış görevler',
@@ -667,6 +686,10 @@ export default {
   'st.display.search.placeholder': 'Genel ayarları ara',
   'st.display.search.empty': 'Eşleşen Genel ayar yok.',
   'st.display.advanced': 'Gelişmiş',
+  ...getApocalypseModeCopy('tr'),
+  ...getEmergencyBoxCopy('tr'),
+  'st.providers.webgpu_download.stopping': 'Durduruluyor ve dosyalar kaldırılıyor…',
+  'st.providers.webgpu_download.stop': 'Durdur ve kaldır',
   'st.display.clarify_timeout.label': 'Açıklama zaman aşımı',
   'st.display.clarify_timeout.desc': 'Açıklama sorusuna yanıt için ne kadar bekleneceği; süre dolunca ilk seçenek otomatik seçilir (seçenek yoksa zaman aşımı). 0 = Anında (her zaman otomatik seç). 1200 sn üzeri = süresiz bekle (Kapalı). Varsayılan 60 sn. İzin ve form gönderim onaylarına uygulanmaz.',
   'st.display.clarify_timeout.off': 'Kapalı',
@@ -782,6 +805,7 @@ export default {
   "sp.slash.teach": "Eylemlerinizi kayıtlı bir iş akışı olarak kaydedin",
   "sp.slash.run_workflow": "Kaydedilmiş iş akışını kimliğe göre çalıştır",
   "sp.workflows.run_prompt": "Kaydedilmiş “{name}” iş akışını çalıştır",
+  "sp.workflows.standalone_unavailable": "Bu bağımsız pencere yalnızca Sor modu içindir. Kaydedilmiş iş akışlarını Harekete Geç modunda çalıştırmak için WebBrain'i yan panelde açın.",
   "sp.workflows.parameters_for": "“{name}” için parametreleri girin. Değerler yalnızca bu çalıştırmada kullanılır.",
   "sp.workflows.parameter_required": "“{name}” zorunludur.",
   "sp.slash.save_workflow": "En son başarılı kaydedilmiş çalışmayı sakla",
@@ -995,4 +1019,5 @@ export default {
   "st.sync.confirm.reset": "Şifrelenmiş bulut kopyası bu cihazın mevcut WebBrain kurulumuyla değiştirilsin mi?",
   "st.sync.consent.legacy": "Şifreli senkronizasyon açılsın mı? WebBrain, anılarınızın, profil otomatik doldurmanızın ve API anahtarı sağlayıcı ayarlarınızın uçtan uca şifrelenmiş bir kopyasını WebBrain Cloud'a iletecektir. Sohbet geçmişi ve OAuth oturum açma işlemleri senkronize edilmez.",
   "st.sync.consent.denied": "Şifrelenmiş senkronizasyon izni verilmedi.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

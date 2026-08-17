@@ -1,7 +1,18 @@
 // Filipino / Tagalog (tl).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Buksan ang native na dialog ng pag-print ng kasalukuyang pahina',
+  'sp.print.error': 'Hindi mabuksan ang dialog ng pag-print: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Naputol ang pag-stream ng tugon; sinusubukang muli ang Ask turn na ito nang walang streaming.',
   'sp.providers.no_setup_group': 'Walang setup',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': 'Wika',
   'sp.btn.settings': 'Mga Setting',
   "sp.btn.clear": "Bagong pag-uusap",
+  'sp.btn.expand': 'Buksan sa bagong window',
   'sp.btn.send': 'Ipadala',
   'sp.chat.follow_response': 'Subaybayan ang sagot',
   'sp.chat.jump_latest': 'Pumunta sa pinakabago',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': 'Kasama ang libreng pang-araw-araw na paggamit ng WebBrain Cloud. Dumadaan ang mga request sa api.webbrain.one; bilang default ay nagla-log kami ng metadata para sa quota at debugging, hindi ang teksto ng prompt, nilalaman ng pahina, mga screenshot, o mga tugon ng modelo. {privacyLink}. Para sa higit pang paggamit, mag-subscribe sa {subscribeLink}. Pamahalaan ang pagsingil sa {accountLink}.',
   'st.providers.webbrain_note.privacy_link': 'Patakaran sa privacy',
   'st.providers.test': 'Subukan ang Koneksyon',
+  'st.providers.duplicate': 'I-duplicate',
+  'st.providers.duplicate_limit': 'Isang duplicate lang ang pinapayagan',
+  'st.providers.duplicate_unavailable': 'Hindi maaaring i-duplicate ang provider na ito',
+  'st.providers.duplicate_inactive': 'I-save ang provider na ito bago ito i-duplicate',
+  'st.providers.remove_duplicate': 'Alisin ang duplicate',
+  'st.providers.remove_duplicate_confirm': 'Alisin ang duplicate na provider na ito at ang naka-save nitong configuration?',
   'st.providers.set_active': 'Itakda Bilang Aktibo',
   'st.providers.active': 'AKTIBO',
   'st.providers.saved': 'Na-save!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': 'Na-clear ang scratchpad.',
   'sp.scratchpad.error': 'Hindi available ang scratchpad: {msg}',
   'sp.perm.verb.schedule': 'mag-iskedyul ng gawaing hinaharap para sa',
+  'sp.perm.verb.window': 'baguhin ang laki ng window ng browser sa',
   'tool.schedule_resume': 'Nag-iiskedyul ng pagpapatuloy',
   'tool.schedule_task': 'Nag-iiskedyul ng gawain',
   'st.display.scheduled_tasks.label': 'Mga naka-iskedyul na gawain',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': 'Maghanap sa General na mga setting',
   'st.display.search.empty': 'Walang tugmang General na mga setting.',
   'st.display.advanced': 'Advanced',
+  ...getApocalypseModeCopy('tl'),
+  ...getEmergencyBoxCopy('tl'),
+  'st.providers.webgpu_download.stopping': 'Hinihinto at inaalis ang mga file…',
+  'st.providers.webgpu_download.stop': 'Ihinto at alisin',
   'st.display.clarify_timeout.label': 'Timeout ng clarify',
   'st.display.clarify_timeout.desc': 'Gaano katagal maghintay ng sagot sa clarify bago awtomatikong piliin ang unang opsyon (o mag-timeout kung walang opsyon). 0 = Agad (palaging auto-select). Higit sa 1200s ay walang hangganan (Naka-off). Default 60s. Hindi para sa permission o form-submit confirmations.',
   'st.display.clarify_timeout.off': 'Naka-off',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "I-record ang iyong mga kilos bilang naka-save na workflow",
   "sp.slash.run_workflow": "Patakbuhin ang naka-save na workflow ayon sa ID",
   "sp.workflows.run_prompt": "Patakbuhin ang naka-save na workflow na “{name}”",
+  "sp.workflows.standalone_unavailable": "Para lang sa mode na Magtanong ang hiwalay na window na ito. Buksan ang WebBrain sa side panel para patakbuhin ang mga naka-save na workflow sa mode na Kumilos.",
   "sp.workflows.parameters_for": "Ilagay ang mga parameter para sa “{name}”. Para sa run na ito lang gagamitin ang mga value.",
   "sp.workflows.parameter_required": "Kailangan ang “{name}”.",
   "sp.slash.save_workflow": "I-save ang pinakabagong matagumpay na naitalang run",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "Palitan ang naka-encrypt na cloud copy ng kasalukuyang setup ng WebBrain ng device na ito?",
   "st.sync.consent.legacy": "I-on ang naka-encrypt na pag-sync? Magpapadala ang WebBrain ng end-to-end na naka-encrypt na kopya ng iyong mga alaala, profile autofill, at API-key na mga setting ng provider sa WebBrain Cloud. Hindi naka-sync ang history ng chat at OAuth sign-in.",
   "st.sync.consent.denied": "Hindi ibinigay ang naka-encrypt na pahintulot sa pag-sync.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

@@ -4,6 +4,7 @@
  */
 
 import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations } from './i18n.js';
+import { CAPABILITY_LABEL } from '../agent/permission-gate.js';
 import { sanitizeMarkdownLinks } from './markdown-link.js';
 import { codeFenceLanguage, highlightCode, renderMarkdownHeadings } from './markdown-render.js';
 import { applyMode, loadMode, watch } from './theme.js';
@@ -26,6 +27,7 @@ import { claimRunError } from './run-error-dedupe.js';
 import { RUN_CAPTURE_START_ERROR_PREFIX } from '../run-capture.js';
 import { runUiUnavailableBeforeSeq } from '../run-ui-journal.js';
 import { formatErrorMessage } from '../error-format.js';
+import { buildMessageInfoPills } from '../message-info.js';
 import { escapeHtml } from './utils.js';
 import {
   isBackgroundConnectionError,
@@ -58,6 +60,8 @@ import {
   removeStagedScreenshots,
   saveStagedScreenshot,
 } from './staged-screenshot-store.js';
+
+const isStandaloneWindow = new URLSearchParams(window.location.search).get('standalone') === 'true';
 
 // Hydrate the theme from chrome.storage.local (the inline <head> bootstrap
 // only sees localStorage; if the user changes the theme on another device
@@ -222,7 +226,7 @@ const pinCoachmarkDismissed = (async function initPinCoachmark() {
   const localModels = document.getElementById('ob-local-models');
   const localModelList = document.getElementById('ob-local-model-list');
   const totalSteps = steps.length;
-  const LOCAL_PROVIDER_ORDER = ['jan', 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'sglang', 'localai', 'gpt4all'];
+  const LOCAL_PROVIDER_ORDER = ['local_openai_proxy', 'jan', 'lmstudio', 'ollama', 'llamacpp', 'vllm', 'sglang', 'localai', 'gpt4all'];
   let current = 0;
   let localScanStarted = false;
   let localModelChoices = [];
@@ -532,17 +536,19 @@ const selectionScopeTitleEl = document.getElementById('selection-scope-title');
 const selectionScopeDescriptionEl = document.getElementById('selection-scope-description');
 const selectionScopeNewConversationBtn = document.getElementById('selection-scope-new-conversation');
 const historyBtn = document.getElementById('btn-history');
+const expandBtn = document.getElementById('btn-expand');
 const settingsBtn = document.getElementById('btn-settings');
 const verboseBtn = document.getElementById('btn-verbose');
 const providerSelect = document.getElementById('provider-select');
+const providerPicker = document.getElementById('provider-picker');
 const providerPickerBtn = document.getElementById('provider-picker-btn');
 const providerPickerMenu = document.getElementById('provider-picker-menu');
 const providerPickerLabel = document.getElementById('provider-picker-label');
+const standaloneWebgpuBtn = document.getElementById('btn-webgpu-standalone');
 const languageSelect = document.getElementById('language-select');
 const languagePickerBtn = document.getElementById('language-picker-btn');
 const languagePickerMenu = document.getElementById('language-picker-menu');
 const languagePickerFlag = document.getElementById('language-picker-flag');
-const languagePickerCode = document.getElementById('language-picker-code');
 const MORE_PROVIDERS_OPTION_VALUE = '__more_providers__';
 const statusDot = document.getElementById('status-dot');
 // Short labels for the closed picker button (menu rows keep the longer status text).
@@ -664,6 +670,7 @@ const SLASH_COMMANDS = [
   { value: '/compact', usage: '/compact [prompt]', descriptionKey: 'sp.slash.compact', action: 'compact', acceptsPayload: true },
   { value: '/verbose', usage: '/verbose', descriptionKey: 'sp.slash.verbose', action: 'toggle', outOfBand: true },
   { value: '/reset', usage: '/reset', descriptionKey: 'sp.slash.reset', action: 'reset' },
+  { value: '/print', usage: '/print', descriptionKey: 'sp.slash.print', action: 'print' },
   {
     value: '/screenshot',
     usage: '/screenshot [--full-page]',
@@ -1025,6 +1032,9 @@ let recommendationsRequestId = 0;
 let providerSelectionRequestId = 0;
 let providerTestRequestId = 0;
 let selectedProviderId = 'webbrain_cloud';
+let standaloneWebgpuEnabled = false;
+let standaloneWebgpuReady = false;
+let standaloneWebgpuActive = false;
 let recommendedActionsCollapsed = false;
 let webbrainPromotionHasAnimated = false;
 let slashCommandMatches = [];
@@ -2388,7 +2398,7 @@ function extractChatHistoryMessages(root = messagesEl) {
       text: normalizeHistoryText(historyTextFromElement(textEl, { markdown: format === 'markdown' })),
       format,
       index,
-      createdAt: Date.now(),
+      createdAt: messageCreatedAt(msgEl),
       ...(attachments.length ? { attachments } : {}),
     };
   }).filter((message) => message.text || message.attachments?.length);
@@ -3499,8 +3509,10 @@ function renderSavedWorkflowManager(manager, workflows, tabId) {
 
     const actions = document.createElement('div');
     actions.className = 'workflow-card-actions';
+    if (!isStandaloneWindow) {
+      actions.append(savedWorkflowManagerActionButton('run', t('sp.scheduled.run_now'), workflow.name));
+    }
     actions.append(
-      savedWorkflowManagerActionButton('run', t('sp.scheduled.run_now'), workflow.name),
       savedWorkflowManagerActionButton('rename', t('sp.workflows.rename'), workflow.name),
       savedWorkflowManagerActionButton('export', t('st.memory.export'), workflow.name),
       savedWorkflowManagerActionButton('delete', t('sp.scheduled.delete'), workflow.name),
@@ -3832,8 +3844,15 @@ function requestSavedWorkflowFile(tabId) {
 
 const boundWorkflowParameterForms = new WeakSet();
 
+function rejectStandaloneWorkflowRun() {
+  if (!isStandaloneWindow) return false;
+  showComposerToast(t('sp.workflows.standalone_unavailable'), { duration: 6000 });
+  return true;
+}
+
 async function startSavedWorkflowRun(workflow, parameters, tabId = currentTabId) {
   if (!workflow?.id || currentTabId !== tabId) return false;
+  if (rejectStandaloneWorkflowRun()) return false;
   if (!(await ensureActMode())) return false;
   inputEl.value = t('sp.workflows.run_prompt', { name: workflow.name });
   autoResizeInput();
@@ -3926,6 +3945,7 @@ function renderSavedWorkflowParameterForm(workflow, tabId = currentTabId) {
 }
 
 async function prepareSavedWorkflowRun(id, tabId = currentTabId) {
+  if (rejectStandaloneWorkflowRun()) return false;
   try {
     const res = await sendToBackground('get_saved_workflow', { id: String(id || '').trim() });
     if (currentTabId !== tabId) return;
@@ -4109,6 +4129,7 @@ async function init() {
   restoreLatestChatTurnPosition();
 
   await loadProviders();
+  await refreshStandaloneWebgpuStatus();
   await testConnection({ skipWebBrainCloud: true });
   await windowScope.syncActiveTab();
   refreshScheduledJobs({ tabId: currentTabId });
@@ -4124,6 +4145,7 @@ async function init() {
     if (changes.verboseMode) {
       verboseMode = changes.verboseMode.newValue;
       if (verboseBtn) verboseBtn.classList.toggle('active', verboseMode);
+      refreshOpenMessageInfoRows();
     }
     if (changes.alwaysAllowApiMutations) {
       alwaysAllowApiMutations = changes.alwaysAllowApiMutations.newValue === true;
@@ -4131,6 +4153,7 @@ async function init() {
     }
     if (changes.providers || changes.activeProvider) {
       void loadProviders();
+      void refreshStandaloneWebgpuStatus();
     }
   });
 }
@@ -4178,6 +4201,7 @@ if (verboseBtn) {
     // Normal click → toggle verbose mode
     verboseMode = !verboseMode;
     verboseBtn.classList.toggle('active', verboseMode);
+    refreshOpenMessageInfoRows();
     await chrome.storage.local.set({ verboseMode }).catch(() => {});
   });
 }
@@ -4367,6 +4391,8 @@ async function adoptRestoredRunState(tabId, state) {
       requestId,
       mode,
       foreground: runUi.foreground === true,
+      ...(isStandaloneWindow ? { standaloneChat: true } : {}),
+      ...standaloneWebgpuRunPayload(),
     }, {
       probeFirst: true,
       requireDurableSubmittedTurn: runUi.kind !== 'continue',
@@ -4573,6 +4599,7 @@ async function applyActiveRunState(numericTabId, state) {
           finalContent: runUi.finalContent,
           submittedTurnDurable: state?.submittedTurnDurable === true,
           attachmentDeliveryState: runUi.attachmentDeliveryState || '',
+          endedAt: runUi.endedAt,
         },
       });
     }
@@ -4719,8 +4746,12 @@ async function recommendedActionSourceStillCurrent(action, tabId) {
 
 async function runRecommendedAction(action) {
   const prompt = typeof action === 'string' ? action : action?.prompt;
+  const displayText = typeof action === 'string'
+    ? prompt
+    : String(action?.label || prompt || '').trim();
   const tabId = currentTabId;
   if (!prompt || tabId == null || isProcessing) return;
+  if (!displayText) return;
   if (!(await recommendedActionSourceStillCurrent(action, tabId)) || currentTabId !== tabId || isProcessing) {
     hideRecommendedActions();
     return;
@@ -4733,13 +4764,18 @@ async function runRecommendedAction(action) {
       return;
     }
   }
-  inputEl.value = prompt;
+  inputEl.value = displayText;
   autoResizeInput();
-  sendMessage(recommendedActionSendParams(action));
+  sendMessage(recommendedActionSendParams(action, { tabId, displayText }));
 }
 
-function recommendedActionSendParams(action) {
+function recommendedActionSendParams(action, { tabId = null, displayText = '' } = {}) {
   const params = action?.runOptions ? { recommendedAction: action.runOptions } : {};
+  if (typeof action?.prompt === 'string' && action.prompt.trim()) {
+    params.__agentPrompt = action.prompt.trim();
+    params.__agentDisplayText = String(displayText || '').trim();
+    params.__agentTabId = tabId;
+  }
   if (['ask', 'act', 'dev'].includes(action?.mode)) {
     params.__mode = action.mode;
   }
@@ -5037,6 +5073,8 @@ function setPlanReviewStructuredControlsDisabled(card, disabled) {
 
 const planReviewScrollRestoreFrames = new WeakMap();
 const planReviewScrollSnapshots = new WeakMap();
+const planReviewAutosizeFrames = new WeakMap();
+const planReviewContainerWidths = new WeakMap();
 
 function restorePlanReviewScrollTop(container, scrollTop) {
   const previousScrollBehavior = container.style.scrollBehavior;
@@ -5084,6 +5122,33 @@ function autosizePlanReviewField(el) {
     }
   });
   planReviewScrollRestoreFrames.set(el, frame);
+}
+
+function autosizePlanReviewFields(root) {
+  root?.querySelectorAll?.('.plan-review-summary-input, .plan-review-step-input')
+    .forEach(autosizePlanReviewField);
+}
+
+function schedulePlanReviewFieldsAutosize(root) {
+  if (!root?.querySelectorAll || planReviewAutosizeFrames.has(root)) return;
+  const frame = requestAnimationFrame(() => {
+    planReviewAutosizeFrames.delete(root);
+    autosizePlanReviewFields(root);
+  });
+  planReviewAutosizeFrames.set(root, frame);
+}
+
+function handlePlanReviewContainerResize(entries) {
+  for (const entry of entries || []) {
+    const root = entry?.target;
+    if (!root?.querySelectorAll) continue;
+    const width = Number(entry?.contentRect?.width);
+    if (Number.isFinite(width)) {
+      if (planReviewContainerWidths.get(root) === width) continue;
+      planReviewContainerWidths.set(root, width);
+    }
+    schedulePlanReviewFieldsAutosize(root);
+  }
 }
 
 function getPlanReviewDraftFromDom(card) {
@@ -5509,6 +5574,10 @@ function bindPlanReviewEditorControls(card, view) {
       try { input?.focus(); } catch {}
     });
   }
+
+  // Cards are initially mounted while detached, and restored cards can be
+  // rebound before layout settles. Measure on the next frame in both cases.
+  schedulePlanReviewFieldsAutosize(card);
 }
 
 function setPlanReviewRawEditing(card, enabled, { focus = false } = {}) {
@@ -5811,6 +5880,7 @@ function rebindCostAllowanceButtons() {
 function retryPayloadFromButton(btn) {
   const text = String(btn?.dataset?.retryText || '').trim();
   if (!text) return null;
+  const displayText = String(btn?.dataset?.retryDisplayText || text).trim() || text;
   const mode = ['ask', 'act', 'dev'].includes(btn.dataset.retryMode)
     ? btn.dataset.retryMode
     : agentMode;
@@ -5823,6 +5893,7 @@ function retryPayloadFromButton(btn) {
     : '';
   return {
     text,
+    displayText,
     mode,
     apiMutationsAllowed: btn.dataset.retryApiMutationsAllowed === 'true',
     foreground: btn.dataset.retryForeground === 'true',
@@ -5853,10 +5924,15 @@ function bindErrorRetryButton(btn) {
     if (payload.apiMutationsAllowed) {
       grantApiMutationsForTab(currentTabId);
     }
-    inputEl.value = payload.text;
+    inputEl.value = payload.displayText;
     autoResizeInput();
     hideSlashCommandAutocomplete();
     const accepted = await sendMessage({
+      ...(payload.displayText !== payload.text ? {
+        __agentPrompt: payload.text,
+        __agentDisplayText: payload.displayText,
+        __agentTabId: currentTabId,
+      } : {}),
       __retry: {
         mode: payload.mode,
         apiMutationsAllowed: payload.apiMutationsAllowed,
@@ -5899,14 +5975,17 @@ function activeRetryPayloadForRequest(tabId, requestId = '') {
 
 function retryPayloadForRunAssistant(assistantEl) {
   const userEl = userMessageForRunAssistant(assistantEl);
-  const text = userEl ? getComposerHistoryTextFromMessage(userEl) : '';
-  if (!String(text || '').trim()) return null;
+  const displayText = String(userEl ? getComposerHistoryTextFromMessage(userEl) : '').trim();
+  if (!displayText) return null;
+  const internalPrompt = String(assistantEl?.dataset.retryAgentPrompt || '').trim();
+  const text = internalPrompt || displayText;
   const sourceGrounding = normalizeSelectionSourceGrounding(assistantEl?.dataset.retrySourceGrounding) || null;
   const selectionAction = sourceGrounding
     ? normalizeSelectionAction(assistantEl?.dataset.retrySelectionAction)
     : '';
   return {
     text,
+    displayText,
     mode: ['ask', 'act', 'dev'].includes(assistantEl?.dataset.runMode)
       ? assistantEl.dataset.runMode
       : agentMode,
@@ -6070,6 +6149,7 @@ function renderAgentErrorUpdate(data, tabId = currentTabId, requestId = '', opti
 function rebindRestoredMessageControls() {
   restoreStagedScreenshotAttachments();
   rebindCopyButtons();
+  rebindMessageInfoToggles();
   rebindCompactStepDetailsToggles();
   rebindScreenshotSaveButtons();
   rebindRetryButtons();
@@ -6211,7 +6291,7 @@ function appendProviderPickerGroup(label) {
   providerPickerMenu.appendChild(el);
 }
 
-function appendProviderPickerOption(id, name, meta) {
+function appendProviderPickerOption(id, name, meta, iconProviderId = id) {
   if (!providerPickerMenu) return;
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -6222,7 +6302,7 @@ function appendProviderPickerOption(id, name, meta) {
 
   // Icons only in the open menu — closed header stays text-only so the
   // WebBrain mark (and other brand chips) don't compete with the chrome.
-  const iconSrc = providerIconUrl(id);
+  const iconSrc = providerIconUrl(iconProviderId);
   if (iconSrc) {
     const img = document.createElement('img');
     img.className = 'provider-icon provider-icon-sm';
@@ -6336,7 +6416,6 @@ function syncLanguagePicker() {
   const code = languageSelect.value || getLocale();
   const language = LANGUAGES.find((item) => item.code === code);
   if (languagePickerFlag && language?.flagCode) languagePickerFlag.src = languageFlagSrc(language.flagCode);
-  if (languagePickerCode) languagePickerCode.textContent = code.toUpperCase();
   if (languagePickerBtn) {
     const controlLabel = `${t('sp.btn.language')}: ${language?.label || code}`;
     languagePickerBtn.title = controlLabel;
@@ -6463,7 +6542,7 @@ async function loadProviders() {
         opt.textContent = `${name} — ${t('sp.providers.active')}`;
         activeGroup.appendChild(opt);
         providerPickerLabelById.set(id, name);
-        appendProviderPickerOption(id, name, t('sp.providers.active'));
+        appendProviderPickerOption(id, name, t('sp.providers.active'), config.sourceProviderId || id);
       }
       providerSelect.appendChild(activeGroup);
     }
@@ -6478,6 +6557,7 @@ async function loadProviders() {
     selectedProviderId = selectableProviderIds.has(res.active) ? res.active : 'webbrain_cloud';
     providerSelect.value = selectedProviderId;
     syncProviderPickerButton();
+    syncStandaloneWebgpuUi();
   } catch (e) {
     console.error('Failed to load providers:', e);
   }
@@ -6490,6 +6570,50 @@ async function openProvidersSettingsPage() {
   } catch {
     chrome.runtime.openOptionsPage();
   }
+}
+
+function setActiveChatProvider(providerId) {
+  return sendToBackground('set_active_provider', { providerId });
+}
+
+function standaloneWebgpuRunPayload() {
+  return isStandaloneWindow && standaloneWebgpuActive ? { providerId: 'webgpu' } : {};
+}
+
+function syncStandaloneWebgpuUi() {
+  if (!standaloneWebgpuBtn) return;
+  standaloneWebgpuBtn.hidden = !isStandaloneWindow;
+  if (!isStandaloneWindow) return;
+  if (!standaloneWebgpuEnabled) standaloneWebgpuActive = false;
+  standaloneWebgpuBtn.disabled = !standaloneWebgpuEnabled;
+  standaloneWebgpuBtn.classList.toggle('active', standaloneWebgpuActive);
+  standaloneWebgpuBtn.setAttribute('aria-pressed', String(standaloneWebgpuActive));
+  standaloneWebgpuBtn.title = !standaloneWebgpuEnabled
+    ? 'Enable Apocalypse Mode first'
+    : standaloneWebgpuActive
+      ? standaloneWebgpuReady
+        ? 'Using WebGPU for this standalone chat'
+        : 'Using WebGPU for this standalone chat · download LFM2.5 2.6B before sending'
+      : standaloneWebgpuReady
+        ? 'Use WebGPU for this standalone chat'
+        : 'Use WebGPU for this standalone chat · model download required';
+  providerSelect.disabled = standaloneWebgpuActive;
+  providerPickerBtn.disabled = standaloneWebgpuActive;
+  providerPicker?.classList.toggle('webgpu-override', standaloneWebgpuActive);
+  if (standaloneWebgpuActive) setProviderPickerOpen(false);
+}
+
+async function refreshStandaloneWebgpuStatus() {
+  if (!isStandaloneWindow || !standaloneWebgpuBtn) return;
+  try {
+    const status = await sendToBackground('get_standalone_webgpu_status');
+    standaloneWebgpuEnabled = status?.enabled === true;
+    standaloneWebgpuReady = status?.ready === true;
+  } catch {
+    standaloneWebgpuEnabled = false;
+    standaloneWebgpuReady = false;
+  }
+  syncStandaloneWebgpuUi();
 }
 
 function isWebBrainCloudProviderSelected() {
@@ -7161,6 +7285,23 @@ function toggledVisionProviderConfig(providerId, config) {
   return { enabled, config: { ...config, supportsVision: enabled } };
 }
 
+async function executePrintSlashCommand(tabId, currentTabId, tabs, scripting, showToast, translate) {
+  try {
+    const tab = tabId == null ? null : await tabs.get(tabId);
+    if (currentTabId !== tabId || !tab?.active) return { skipped: true };
+    await scripting.executeScript({
+      target: { tabId },
+      func: () => window.print(),
+    });
+    return { ok: true };
+  } catch (error) {
+    if (currentTabId === tabId) {
+      showToast(translate('sp.print.error', { msg: error?.message || 'unknown error' }), { duration: 5000 });
+    }
+    return { error: error?.message || 'unknown error' };
+  }
+}
+
 async function parseSlashCommands(text, tabId = currentTabId, options = {}) {
   if (/^\s*\/watch(?:\s|$)/i.test(text) && !/^\s*\/watch\s+--help\s*$/i.test(text)) {
     const watchArgs = parseWatchSlashCommand(text);
@@ -7213,7 +7354,7 @@ async function parseSlashCommands(text, tabId = currentTabId, options = {}) {
     return '';
   }
 
-  if ((command.value === '/screenshot' || command.value === '/record')
+  if ((command.value === '/screenshot' || command.value === '/record' || command.value === '/print')
       && isSelectionGroundedForTab(tabId)) {
     showComposerToast(t('sp.selection_scope.description'), { duration: 5000 });
     return '';
@@ -7355,6 +7496,7 @@ async function parseSlashCommands(text, tabId = currentTabId, options = {}) {
   if (command.value === '/verbose') {
     verboseMode = !verboseMode;
     if (verboseBtn) verboseBtn.classList.toggle('active', verboseMode);
+    refreshOpenMessageInfoRows();
     await chrome.storage.local.set({ verboseMode }).catch(() => {});
     if (currentTabId !== tabId) return '';
     showComposerToast(systemHtml(verboseMode
@@ -7373,6 +7515,11 @@ async function parseSlashCommands(text, tabId = currentTabId, options = {}) {
     } finally {
       setConversationClearInProgress(tabId, false);
     }
+    return '';
+  }
+
+  if (command.value === '/print') {
+    await executePrintSlashCommand(tabId, currentTabId, chrome.tabs, chrome.scripting, showComposerToast, t);
     return '';
   }
 
@@ -7616,7 +7763,7 @@ async function parseSlashCommands(text, tabId = currentTabId, options = {}) {
       const { providers, active } = await sendToBackground('get_providers');
       const config = providers[active];
       if (config) {
-        const toggled = toggledVisionProviderConfig(active, config);
+        const toggled = toggledVisionProviderConfig(config.sourceProviderId || active, config);
         await sendToBackground('update_provider', {
           providerId: active,
           config: toggled.config,
@@ -7638,6 +7785,7 @@ async function parseSlashCommands(text, tabId = currentTabId, options = {}) {
 }
 
 function modeForMessageText(text) {
+  if (isStandaloneWindow) return 'ask';
   const invocation = parseSlashInvocation(text);
   if (invocation?.command?.value === '/ask' || invocation?.command?.value === '/plan') return 'ask';
   if (invocation?.command?.value === '/act') return 'act';
@@ -7694,15 +7842,38 @@ async function startFullScreenRecording(tabId = currentTabId, recordOptions = {}
 }
 
 async function sendMessage(extraChatParams = {}) {
+  if (isStandaloneWindow) {
+    if (extraChatParams?.workflowId) {
+      rejectStandaloneWorkflowRun();
+      return false;
+    }
+    const retryOptions = extraChatParams?.__retry;
+    extraChatParams = {
+      ...(extraChatParams || {}),
+      __mode: 'ask',
+      ...(retryOptions ? { __retry: { ...retryOptions, mode: 'ask' } } : {}),
+    };
+  }
   const retryOptions = extraChatParams?.__retry || null;
   const modeOverride = ['ask', 'act', 'dev'].includes(extraChatParams?.__mode) ? extraChatParams.__mode : null;
   const onContextMenuClaimRejected = typeof extraChatParams?.__onContextMenuClaimRejected === 'function'
     ? extraChatParams.__onContextMenuClaimRejected
     : null;
   const chatExtraParams = { ...(extraChatParams || {}) };
+  const agentPrompt = typeof chatExtraParams.__agentPrompt === 'string'
+    ? chatExtraParams.__agentPrompt.trim()
+    : '';
+  const agentDisplayText = typeof chatExtraParams.__agentDisplayText === 'string'
+    ? chatExtraParams.__agentDisplayText.trim()
+    : '';
+  const rawAgentTabId = Number(chatExtraParams.__agentTabId);
+  const agentTabId = Number.isFinite(rawAgentTabId) ? rawAgentTabId : null;
   delete chatExtraParams.__retry;
   delete chatExtraParams.__mode;
   delete chatExtraParams.__onContextMenuClaimRejected;
+  delete chatExtraParams.__agentPrompt;
+  delete chatExtraParams.__agentDisplayText;
+  delete chatExtraParams.__agentTabId;
   const isWorkflowRun = !!chatExtraParams.workflowId;
   const contextMenuClaim = chatExtraParams.contextMenuClaim;
   let contextMenuClaimOwned = Boolean(contextMenuClaim?.promptId && contextMenuClaim?.claimantId);
@@ -7735,6 +7906,14 @@ async function sendMessage(extraChatParams = {}) {
   delete chatExtraParams.selectionAction;
   if (selectionAction) chatExtraParams.selectionAction = selectionAction;
   await waitForVisibleSidePanelStateRefresh();
+  if (agentPrompt && (
+    !agentDisplayText
+    || agentTabId == null
+    || !sameTabId(currentTabId, agentTabId)
+    || !sameTabId(renderedTabId, agentTabId)
+    || inputEl.value.trim() !== agentDisplayText
+  )) return false;
+  if (agentPrompt && isProcessing) return false;
   if (contextMenuClaimOwned
       && (document.visibilityState === 'hidden'
         || !sameTabId(currentTabId, claimedContextMenuTabId)
@@ -7744,6 +7923,7 @@ async function sendMessage(extraChatParams = {}) {
   }
   stopListening();
   let text = inputEl.value.trim();
+  const submittedText = text;
   if (!text) {
     if (contextMenuClaimOwned) {
       await releaseOwnedContextMenuClaim({ reason: 'preflight-empty', retryAfterMs: 1_000 });
@@ -7751,7 +7931,7 @@ async function sendMessage(extraChatParams = {}) {
     }
     return;
   }
-  const submittedText = text;
+  if (agentPrompt) text = agentPrompt;
   const tabId = currentTabId;
   if (isConversationClearInProgress(tabId)) {
     await releaseOwnedContextMenuClaim({ reason: 'conversation-clear', retryAfterMs: 1_000 });
@@ -7803,7 +7983,7 @@ async function sendMessage(extraChatParams = {}) {
   }
   let runCaptureDirective = null;
   if (!retryOptions) {
-    if (sourceGrounding && /^\s*\/(?:screenshot|record)(?:\s|$)/i.test(text)) {
+    if (sourceGrounding && /^\s*\/(?:screenshot|record|print)(?:\s|$)/i.test(text)) {
       showComposerToast(t('sp.selection_scope.description'), { duration: 5000 });
       return false;
     }
@@ -7848,7 +8028,7 @@ async function sendMessage(extraChatParams = {}) {
     && sameTabId(renderedTabId, tabId);
   if (!renderToCurrentTab) {
     await releaseOwnedContextMenuClaim();
-    if (text) saveInputDraftForTab(tabId, text);
+    if (text) saveInputDraftForTab(tabId, agentPrompt ? submittedText : text);
     return false;
   }
   // If the entire message was just the slash command, there's nothing
@@ -7880,7 +8060,7 @@ async function sendMessage(extraChatParams = {}) {
     && sameTabId(renderedTabId, tabId);
   if (!renderToCurrentTab) {
     await releaseOwnedContextMenuClaim();
-    if (text) saveInputDraftForTab(tabId, text);
+    if (text) saveInputDraftForTab(tabId, agentPrompt ? submittedText : text);
     setTabProcessing(tabId, false);
     setTabAbortRequested(tabId, false);
     syncSendButtonState();
@@ -7926,7 +8106,7 @@ async function sendMessage(extraChatParams = {}) {
     && sameTabId(renderedTabId, tabId);
   if (!renderToCurrentTab) {
     await releaseOwnedContextMenuClaim();
-    if (text) saveInputDraftForTab(tabId, text);
+    if (text) saveInputDraftForTab(tabId, agentPrompt ? submittedText : text);
     setTabProcessing(tabId, false);
     setTabAbortRequested(tabId, false);
     syncSendButtonState();
@@ -7964,6 +8144,7 @@ async function sendMessage(extraChatParams = {}) {
   }
   const retryPayload = {
     text,
+    displayText: agentPrompt ? submittedText : text,
     mode: modeForSend,
     apiMutationsAllowed: apiMutationsAllowedForSend,
     foreground: foregroundForSend,
@@ -7982,7 +8163,7 @@ async function sendMessage(extraChatParams = {}) {
       renderAttachmentPreviews();
     }
     resetChatNavigation();
-    userEl = addMessage('user', text, {
+    userEl = addMessage('user', agentPrompt ? submittedText : text, {
       attachments: attachmentsForSend,
       attachmentState: attachmentsForSend.length ? 'sending' : '',
     });
@@ -7995,6 +8176,7 @@ async function sendMessage(extraChatParams = {}) {
     assistantEl.dataset.retrySourceGrounding = sourceGrounding || '';
     assistantEl.dataset.retrySelectionAction = selectionAction;
     assistantEl.dataset.retryAttachmentCount = String(attachmentsForSend.length);
+    if (agentPrompt) assistantEl.dataset.retryAgentPrompt = agentPrompt;
     userEl.dataset.runRequestId = requestId;
     assistantEl.dataset.lastRenderedSeq = '0';
     currentAssistantEl = assistantEl;
@@ -8023,6 +8205,7 @@ async function sendMessage(extraChatParams = {}) {
       intentFailureMessage: t('sp.plan.intent_unavailable'),
       apiMutationsAllowed: apiMutationsAllowedForSend,
       foreground: foregroundForSend,
+      ...(isStandaloneWindow ? { standaloneChat: true } : {}),
       ...(runCaptureDirective ? {
         runCapture: {
           kind: runCaptureDirective.kind,
@@ -8031,6 +8214,7 @@ async function sendMessage(extraChatParams = {}) {
       } : {}),
       ...(attachmentsForSend.length ? { attachments: attachmentsForSend } : {}),
       ...chatExtraParams,
+      ...standaloneWebgpuRunPayload(),
     });
     applyConversationScopeState(tabId, res);
     if (res?.conversationId) {
@@ -8076,8 +8260,8 @@ async function sendMessage(extraChatParams = {}) {
       // Restore the prompt only if the user hasn't started typing a new one
       // while the rejected turn was in flight.
       if (currentTabId === tabId && !inputEl.value.trim()) {
-        inputEl.value = text;
-        saveInputDraftForTab(tabId, text);
+        inputEl.value = agentPrompt ? submittedText : text;
+        saveInputDraftForTab(tabId, agentPrompt ? submittedText : text);
         autoResizeInput();
         updateSlashCommandAutocomplete();
       }
@@ -8322,6 +8506,11 @@ chrome.runtime.onMessage.addListener((msg) => {
       || msg.action !== 'user_memory_created'
       || document.visibilityState === 'hidden') return;
   showComposerToast(t('sp.memory.remembered'), { duration: 3200, effect: 'memory' });
+});
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (!isStandaloneWindow || !['webgpu-text-download-state', 'apocalypse-mode-state'].includes(msg?.type)) return;
+  void refreshStandaloneWebgpuStatus();
 });
 
 // Recorder broadcasts — independent of the per-tab agent_update flow.
@@ -8772,6 +8961,10 @@ function handleAgentUpdateMessage(msg) {
       reportTrailingRunCaptureError({ kind: data?.kind }, new Error(data?.message || 'unknown error'), eventTabId);
       break;
 
+    case 'message_info':
+      applyMessageCompletion(eventAssistantEl || currentAssistantEl, data);
+      break;
+
     case 'error':
       hideActivity();
       if (currentAssistantEl) markLastStepFailed();
@@ -8822,6 +9015,7 @@ function handleAgentUpdateMessage(msg) {
       break;
 
     case 'run_complete':
+      setMessageCreatedAt(eventAssistantEl || currentAssistantEl, data?.endedAt, { replace: true });
       if (currentAssistantEl) finalizeSteps(currentAssistantEl);
       reconcileRunMessageAttachmentState(
         eventTabId,
@@ -9133,8 +9327,13 @@ function renderClarifyCard(data) {
     card.dataset.permission = '1';
     const host = String(data.permission.host || '');
     const cap = String(data.permission.capability || '');
-    const verb = t('sp.perm.verb.' + cap);
-    qEl.textContent = t('sp.perm.question', { verb, host });
+    const verbKey = 'sp.perm.verb.' + cap;
+    const verb = t(verbKey);
+    // English falls back to the single CAPABILITY_LABEL source of truth so the
+    // consent wording cannot drift between two English copies; other locales
+    // carry their own translation under the key.
+    const resolvedVerb = verb === verbKey ? (CAPABILITY_LABEL[cap] || cap) : verb;
+    qEl.textContent = t('sp.perm.question', { verb: resolvedVerb, host });
 
     const reasonEl = document.createElement('div');
     reasonEl.className = 'clarify-reason';
@@ -10177,6 +10376,7 @@ function configureRetryButton(btn, retryPayload) {
   }
   btn.dataset.retryId = retryId;
   btn.dataset.retryText = String(retryPayload.text || '');
+  btn.dataset.retryDisplayText = String(retryPayload.displayText || retryPayload.text || '');
   btn.dataset.retryMode = retryPayload.mode || 'ask';
   btn.dataset.retryApiMutationsAllowed = retryPayload.apiMutationsAllowed ? 'true' : 'false';
   btn.dataset.retryForeground = retryPayload.foreground ? 'true' : 'false';
@@ -10322,6 +10522,162 @@ function messageAttachmentMetadata(msgEl) {
   }, item.dataset.deliveryState));
 }
 
+function messageCreatedAt(msgEl) {
+  const value = Number(msgEl?.dataset?.messageCreatedAt);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function setMessageCreatedAt(msgEl, value, { replace = false } = {}) {
+  if (!msgEl) return null;
+  const existing = Number(msgEl.dataset.messageCreatedAt);
+  if (!replace && Number.isFinite(existing) && existing > 0) return existing;
+  const candidate = Number(value);
+  const next = Number.isFinite(candidate) && candidate > 0 ? candidate : existing;
+  if (!Number.isFinite(next) || next <= 0) return null;
+  msgEl.dataset.messageCreatedAt = String(Math.round(next));
+  if (msgEl.classList.contains('message-info-open')) renderMessageInfo(msgEl);
+  return next;
+}
+
+function messageCompletionFromElement(msgEl) {
+  return {
+    inputTokens: Number(msgEl?.dataset?.messageInputTokens) || 0,
+    outputTokens: Number(msgEl?.dataset?.messageOutputTokens) || 0,
+    totalTokens: Number(msgEl?.dataset?.messageTotalTokens) || 0,
+    durationMs: Number(msgEl?.dataset?.messageDurationMs) || 0,
+    finishReason: String(msgEl?.dataset?.messageFinishReason || ''),
+  };
+}
+
+let messageInfoRowId = 0;
+
+function ensureMessageInfoElements(msgEl) {
+  let bar = msgEl.querySelector(':scope > .message-info-bar');
+  let row = bar?.querySelector(':scope > .message-info')
+    || msgEl.querySelector(':scope > .message-info');
+  let toggle = msgEl.querySelector(':scope > .message-info-toggle')
+    || bar?.querySelector(':scope > .message-info-toggle');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.className = 'message-info-bar';
+    const legacyControl = toggle || row;
+    if (legacyControl) msgEl.insertBefore(bar, legacyControl);
+    else msgEl.appendChild(bar);
+  }
+  if (!row) {
+    row = document.createElement('div');
+    row.className = 'message-info';
+    row.setAttribute('role', 'status');
+  }
+  if (row.parentNode !== bar) {
+    bar.appendChild(row);
+  }
+  if (!row.id) {
+    let id;
+    do {
+      id = `message-info-${++messageInfoRowId}`;
+    } while (document.getElementById(id));
+    row.id = id;
+  }
+  if (!toggle) {
+    toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'message-info-toggle';
+  }
+  toggle.textContent = '';
+  if (toggle.parentNode !== msgEl) {
+    msgEl.insertBefore(toggle, msgEl.children[0] || null);
+  }
+  toggle.setAttribute('aria-controls', row.id);
+  toggle.setAttribute('aria-expanded', String(msgEl.classList.contains('message-info-open')));
+  toggle.setAttribute('aria-label', t('sp.message_info.hint'));
+  toggle.title = t('sp.message_info.hint');
+  return { row, toggle };
+}
+
+function renderMessageInfo(msgEl) {
+  if (!msgEl) return;
+  const { row } = ensureMessageInfoElements(msgEl);
+  const pills = buildMessageInfoPills({
+    createdAt: messageCreatedAt(msgEl),
+    completion: messageCompletionFromElement(msgEl),
+    verbose: verboseMode,
+    locale: getLocale(),
+  });
+  row.replaceChildren(...pills.map((pill) => {
+    const item = document.createElement('span');
+    item.className = pill.kind === 'sent'
+      ? 'message-info-item message-info-sent'
+      : `message-info-item message-info-pill message-info-${pill.kind}`;
+    item.textContent = t(pill.key, pill.params);
+    return item;
+  }));
+  row.hidden = !msgEl.classList.contains('message-info-open') || pills.length === 0;
+}
+
+function messageInfoClickIsInteractive(target) {
+  return !!target?.closest?.(
+    'a, button, input, textarea, select, summary, [role="button"], [contenteditable="true"]',
+  );
+}
+
+function toggleMessageInfo(msgEl) {
+  const open = msgEl.classList.toggle('message-info-open');
+  ensureMessageInfoElements(msgEl).toggle.setAttribute('aria-expanded', String(open));
+  renderMessageInfo(msgEl);
+  schedulePersist();
+}
+
+function bindMessageInfoToggle(msgEl) {
+  if (!msgEl?.matches?.('.message.user, .message.assistant')) return;
+  if (!messageCreatedAt(msgEl)) return;
+  msgEl.removeAttribute('tabindex');
+  msgEl.removeAttribute('aria-expanded');
+  msgEl.removeAttribute('title');
+  const { toggle } = ensureMessageInfoElements(msgEl);
+  if (msgEl.classList.contains('message-info-open')) renderMessageInfo(msgEl);
+  if (msgEl.__wbMessageInfoBound) return;
+  msgEl.__wbMessageInfoBound = true;
+  toggle.addEventListener('click', () => toggleMessageInfo(msgEl));
+  msgEl.addEventListener('click', (event) => {
+    if (messageInfoClickIsInteractive(event.target)) return;
+    toggleMessageInfo(msgEl);
+  });
+}
+
+function rebindMessageInfoToggles() {
+  messagesEl.querySelectorAll(':scope > .message.user, :scope > .message.assistant')
+    .forEach(bindMessageInfoToggle);
+}
+
+function applyMessageCompletion(msgEl, completion = {}) {
+  if (!msgEl) return;
+  const values = {
+    messageInputTokens: completion.inputTokens,
+    messageOutputTokens: completion.outputTokens,
+    messageTotalTokens: completion.totalTokens,
+    messageDurationMs: completion.durationMs,
+  };
+  for (const [key, value] of Object.entries(values)) {
+    const number = Number(value);
+    msgEl.dataset[key] = String(Number.isFinite(number) && number >= 0 ? Math.round(number) : 0);
+  }
+  msgEl.dataset.messageFinishReason = String(completion.finishReason || '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, 80);
+  if (msgEl.classList.contains('message-info-open')) renderMessageInfo(msgEl);
+  schedulePersist();
+}
+
+function refreshOpenMessageInfoRows() {
+  messagesEl.querySelectorAll(':scope > .message.user, :scope > .message.assistant').forEach((msgEl) => {
+    if (!messageCreatedAt(msgEl)) return;
+    ensureMessageInfoElements(msgEl);
+    if (msgEl.classList.contains('message-info-open')) renderMessageInfo(msgEl);
+  });
+}
+
 function addMessage(role, content, options = {}) {
   const msgEl = document.createElement('div');
   msgEl.className = `message ${role}`;
@@ -10371,6 +10727,10 @@ function addMessage(role, content, options = {}) {
     messagesEl.insertBefore(msgEl, currentAssistantEl);
   } else {
     messagesEl.appendChild(msgEl);
+  }
+  if (role === 'user' || role === 'assistant') {
+    setMessageCreatedAt(msgEl, options.createdAt ?? Date.now());
+    bindMessageInfoToggle(msgEl);
   }
 
   if (role === 'error' && options.retryPayload
@@ -10480,6 +10840,7 @@ function showContinueButton(options = {}) {
 }
 
 async function continueAgent(options = {}) {
+  if (isStandaloneWindow) options = { ...options, mode: 'ask' };
   const tabId = currentTabId;
   const modeForSend = ['ask', 'act', 'dev'].includes(options?.mode) ? options.mode : agentMode;
   if (rejectSelectionScopedMode(modeForSend, tabId)) return false;
@@ -10520,6 +10881,8 @@ async function continueAgent(options = {}) {
       requestId,
       mode: modeForSend,
       foreground: foregroundForSend,
+      ...(isStandaloneWindow ? { standaloneChat: true } : {}),
+      ...standaloneWebgpuRunPayload(),
     });
     applyConversationScopeState(tabId, res);
     if (res?.conversationId) {
@@ -10917,9 +11280,17 @@ chatNavigationDismissEl?.addEventListener('click', () => {
   setChatNavigationVisible(false);
 });
 
-globalThis.addEventListener?.('resize', scheduleChatNavigationUpdate);
+function scheduleSidepanelResponsiveUpdates() {
+  scheduleChatNavigationUpdate();
+  schedulePlanReviewFieldsAutosize(messagesEl);
+}
+
+globalThis.addEventListener?.('resize', scheduleSidepanelResponsiveUpdates);
 if (globalThis.ResizeObserver && messagesEl) {
-  const chatNavigationResizeObserver = new ResizeObserver(scheduleChatNavigationUpdate);
+  const chatNavigationResizeObserver = new ResizeObserver((entries) => {
+    scheduleChatNavigationUpdate();
+    handlePlanReviewContainerResize(entries);
+  });
   chatNavigationResizeObserver.observe(messagesEl);
 }
 
@@ -11357,7 +11728,7 @@ function positionModeHighlight(btn, { instant = false } = {}) {
 }
 
 function setMode(mode) {
-  if (mode !== 'ask' && mode !== 'act' && mode !== 'dev') mode = 'ask';
+  mode = normalizeAgentMode(mode);
   const previousMode = agentMode;
   agentMode = mode;
   if (previousMode === 'dev' && mode !== 'dev') {
@@ -11382,6 +11753,11 @@ function setMode(mode) {
 
   updateActWarning();
   resetInputPlaceholderRotation();
+}
+
+function normalizeAgentMode(mode) {
+  if (isStandaloneWindow) return 'ask';
+  return mode === 'act' || mode === 'dev' ? mode : 'ask';
 }
 
 async function ensureActMode() {
@@ -11900,6 +12276,11 @@ async function restoreStagedScreenshotAttachments(root = messagesEl, tabId = ren
   updateAttachmentReadCount(numericTabId, 1);
   try {
     const results = Array.from(root.querySelectorAll?.('.screenshot-result') || []);
+    const pendingScreenshotIdsBeforeLoad = new Set(getPendingAttachmentsForTab(
+      numericTabId,
+      { create: false },
+    ).filter(attachment => attachment?.source === 'slash_screenshot')
+      .map(attachment => attachment.stagedAttachmentId));
     const storedAttachments = await loadStagedScreenshots(chrome.storage.local, numericTabId);
     if (!sameTabId(renderedTabId ?? currentTabId, numericTabId)) return;
     const pendingStoredAttachments = storedAttachments.filter(attachment => attachment.deliveryState === 'pending');
@@ -11935,6 +12316,9 @@ async function restoreStagedScreenshotAttachments(root = messagesEl, tabId = ren
     const pending = getPendingAttachmentsForTab(numericTabId).filter(attachment => (
       attachment?.source !== 'slash_screenshot'
       || restoredIds.has(attachment.stagedAttachmentId)
+      // A capture may finish while storage is being read. It is not part of
+      // this restore snapshot and must remain staged for the next message.
+      || !pendingScreenshotIdsBeforeLoad.has(attachment.stagedAttachmentId)
     ));
     for (const { result, attachment } of restored) {
       const image = result.querySelector('.screenshot-result-image');
@@ -12347,6 +12731,7 @@ document.addEventListener('wb-locale-changed', () => {
   if (slashCommandMatches.length) renderSlashCommandAutocomplete();
   renderQueuedComposerMessages();
   syncSelectionScopeUi();
+  refreshOpenMessageInfoRows();
   void loadProviders();
 });
 
@@ -12389,7 +12774,7 @@ providerSelect.addEventListener('change', async () => {
   const requestId = ++providerSelectionRequestId;
   providerTestRequestId += 1;
   try {
-    await sendToBackground('set_active_provider', { providerId });
+    await setActiveChatProvider(providerId);
   } catch (e) {
     if (requestId === providerSelectionRequestId && providerSelect.value === providerId) {
       markSelectedProviderFailed(e);
@@ -12399,12 +12784,19 @@ providerSelect.addEventListener('change', async () => {
   if (requestId !== providerSelectionRequestId || providerSelect.value !== providerId) {
     const latestProviderId = providerSelect.value;
     if (latestProviderId && latestProviderId !== providerId) {
-      sendToBackground('set_active_provider', { providerId: latestProviderId }).catch(() => {});
+      setActiveChatProvider(latestProviderId).catch(() => {});
     }
     return;
   }
   selectedProviderId = providerId;
   await testConnection({ providerId });
+});
+
+standaloneWebgpuBtn?.addEventListener('click', async () => {
+  await refreshStandaloneWebgpuStatus();
+  if (!standaloneWebgpuEnabled) return;
+  standaloneWebgpuActive = !standaloneWebgpuActive;
+  syncStandaloneWebgpuUi();
 });
 
 providerPickerBtn?.addEventListener('click', (event) => {
@@ -12511,6 +12903,36 @@ historyBtn?.addEventListener('click', () => {
 settingsBtn.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
+
+function standaloneWindowBounds(display = window.screen) {
+  const availableWidth = Math.max(1, Number(display?.availWidth) || 1280);
+  const availableHeight = Math.max(1, Number(display?.availHeight) || 800);
+  const availableLeft = Number(display?.availLeft) || 0;
+  const availableTop = Number(display?.availTop) || 0;
+  const width = Math.min(availableWidth, Math.max(360, Math.round(availableWidth * 0.9)));
+  const height = Math.min(availableHeight, Math.max(560, Math.round(availableHeight * 0.9)));
+  return {
+    width,
+    height,
+    left: availableLeft + Math.round((availableWidth - width) / 2),
+    top: availableTop + Math.round((availableHeight - height) / 2),
+  };
+}
+
+if (expandBtn) {
+  if (isStandaloneWindow) {
+    expandBtn.style.display = 'none';
+  } else {
+    expandBtn.addEventListener('click', () => {
+      const standaloneUrl = chrome.runtime.getURL('src/ui/sidepanel.html?mode=ask&standalone=true');
+      chrome.windows.create({
+        url: standaloneUrl,
+        type: 'popup',
+        ...standaloneWindowBounds(),
+      });
+    });
+  }
+}
 
 // --- Language picker (compact trigger + accessible custom listbox) ---
 if (languageSelect) {

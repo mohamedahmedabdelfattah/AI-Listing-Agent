@@ -48,7 +48,7 @@ This doc covers the shared architecture and calls out where the builds diverge.
 │                                                      │
 │  Chrome only:                                        │
 │    ├─ cdp/             — Chrome DevTools Protocol    │
-│    └─ offscreen/       — fetch proxy + tab recorder  │
+│    └─ offscreen/       — fetch proxy + recorder + local vision worker │
 └──────┬──────────────────────────────────────────────┘
        │ chrome.scripting.executeScript / CDP
        ▼
@@ -171,6 +171,20 @@ _enrichUserMessageWithCurrentPage(tabId, messages, userMessage)
      c. Attach image_url block or vision description to first user message
   5. Return enriched user message
 ```
+
+#### Page context reduction
+
+WebBrain does not send raw HTML or a raw DOM dump to the model by default. The
+initial page context is the sanitized URL and title, matching site-adapter
+guidance, and an optional viewport screenshot when vision is available. When a
+task needs page content, the agent requests it on demand as a reduced semantic
+accessibility tree or as extracted text.
+
+These reads use visibility filters where appropriate, enforce character
+budgets, and paginate larger results instead of placing the entire rendered
+document into one model request. See [accessibility read budgets](agent-tools.md#accessibility-read-budgets)
+and [adaptive read windows](accessibility-tree-and-refs.md#adaptive-read-windows).
+Raw page-source access through `read_page_source` is available only in Dev mode.
 
 ### Step 4: Plan-before-Act Gate
 
@@ -409,7 +423,7 @@ tracks as a successful video or hand ffmpeg work to the user.
 | Draft or rewrite an email reply, message, or post the user will send | Humanizer | Ask, Act, Dev | Prompt-only; preactivated on webmail adapters and on the explicit Humanize selected-text shortcut, otherwise routed by catalog. Returns final text only. |
 | Look up weather or a short forecast | Open-Meteo weather | Ask, Act, Dev | Read-only tools remain subject to their manifest filters. |
 | Find books, ISBNs, authors, or publication data | Open Library | Ask, Act, Dev | Read-only tools remain subject to their manifest filters. |
-| Search or summarize an encyclopedia topic | Wikipedia | Ask, Act, Dev | Read-only Wikipedia REST/Action API tools; results are untrusted. |
+| Search or summarize an encyclopedia topic | Wikipedia | Ask, Act, Dev | Live Wikipedia APIs plus explicitly installed local Kiwix/ZIM archives; all results are untrusted. |
 | Restore Turkish characters in ASCII Turkish text after an explicit user request | Turkish deasciifier | Ask, Act, Dev | Prompt-only and opt-in; ordinary form-entry tools continue to type their text argument verbatim. |
 | Upload one non-sensitive file to a short-lived public link | Temporary file share (Litterbox) | Act, Dev | Not shown to Ask; the skill uses existing browser upload tools. |
 
@@ -421,6 +435,16 @@ reinforced by WebBrain's untrusted-content wrappers and the loader description,
 not a deterministic intent classifier. Routing quality also depends on concise,
 distinct summaries; a broad skill such as FreeSkillz deliberately loads one
 instruction bundle for several related capabilities.
+
+The packaged Wikipedia skill keeps its existing `search_wikipedia` and
+`get_wikipedia_summary` interface. When a live request fails, the exact
+built-in tool may query archives that the user explicitly installed through
+the ☢ Apocalypse Mode link in the Settings header. `apocalypse-mode.js` owns catalog
+metadata, resumable piece verification, durable lifecycle state, OPFS or
+user-selected archive bytes, and the local openZIM reader. IndexedDB contains only configuration,
+archive metadata, and restart cursors—not multi-gigabyte archive bodies.
+Kiwix content remains on the dynamic skill's `resultPolicy: "untrusted"` path.
+See [Apocalypse Mode](apocalypse-mode.md) for storage and browser limits.
 
 The optional metadata format is a separate prompt-stripped fence:
 
@@ -491,7 +515,7 @@ Background relays these via `chrome.runtime.sendMessage` to the side panel, whic
 
 ### Plan before Act (`planner.js`)
 
-The action-mode intent gate runs before the first browser tool call. Off uses the compact schema; Try and Strict use the full planning schema, with unset storage defaulting to Try. The full planner prompt requires a single JSON object with summary, concrete steps, validated `skill_ids`, memory strategy, scheduling hint, risks, and an action mode. Mid/Full planners receive only the eligible routing catalog, and approved skill IDs are activated before the normal execution model call. `normalizePlan()` bounds and sanitizes each field; `formatPlanMarkdown()` renders the side-panel review card; `formatPlanScratchpad()` pins the approved or edited plan as an `[Approved plan]` scratchpad entry.
+The action-mode intent gate runs before the first browser tool call. Off uses the compact schema; Try and Strict use the full planning schema, with unset storage defaulting to Try. The full planner prompt requires a single JSON object with summary, concrete steps, validated `skill_ids`, memory strategy, scheduling hint, risks, and an action mode. Both schemas also carry a language-neutral `messaging` target when the trusted user request authorizes an external message: either the exact named recipient or an explicitly referenced active conversation. Mid/Full planners receive only the eligible routing catalog, and approved skill IDs are activated before the normal execution model call. `normalizePlan()` bounds and sanitizes each field; `formatPlanMarkdown()` renders the side-panel review card; `formatPlanScratchpad()` pins the approved or edited plan as an `[Approved plan]` scratchpad entry.
 
 The browser-owned per-turn runtime context includes the effective
 `runtime_mode` and whether mutation tools are enabled. This envelope is added
@@ -685,6 +709,8 @@ Jobs are stored in `chrome.storage.local` under the key `wb_scheduled_jobs` as a
 
 58+ adapters inject site-specific guidance into the first user message (and re-inject on navigation to a different matched site). Only ONE adapter fires at a time (`getActiveAdapter(url)` returns the first match). See `docs/site-adapters.md` for how to write one.
 
+Adapters may also expose narrowly scoped runtime policy. Douyin `/chat` is the first `messaging.verifyActiveRecipient` route. The structured planner resolves an anaphoric recipient to `named` only when authentic prior-user context identifies exactly one target; unresolved pronouns clarify, while `active_conversation` is reserved for an explicit reference to the currently open thread itself. An `active_conversation` planner target must first be pinned to exactly one strong visible header identity before any page tool runs; ambiguous or missing evidence stops for clarification. Immediately before a send-like click, submitted field, or Enter press, the content script resolves the exact target and a lower-page layout composer, then collects only unique header evidence from the narrow, non-scrollable region above it. Enter or submitted field input in a different editable is conclusively non-message only when structural semantics positively identify a search or navigation field; an alternate reply/forward/split-pane composer remains inconclusive and therefore cannot bypass recipient verification. A distant general control likewise remains inconclusive rather than being declared safe. A semantic conversation row in a separate left rail is conclusively navigation-only, allowing recovery to the requested thread whether or not the short rail currently overflows; nested row buttons, links, and their leaf descendants plus controls outside that structure remain inconclusive. The agent requires exact normalized identity equality and returns a no-dispatch blocker on missing, inconclusive, ambiguous, or mismatched evidence, and protected Enter dispatch permits exactly one keypress per verification. Every authorized `click`, `click_ax`, `set_field({submit:true})`, and composer Enter receives a one-use binding to the exact action target, composer, URL, and identity set. Direct content dispatches and Chrome's trusted CDP mouse/key paths consume and revalidate it immediately before `el.click()`, `mousePressed`, or Enter, after any field reconciliation and combobox delays; protected `click_ax` never issues a second no-progress fallback click. Search-result text, message content, input values, generic page text, failed probes, and edited plans with stale hidden metadata cannot authorize a send. Dispatch-capable tools whose effects cannot be bound to the probed recipient (`iframe_click`, `execute_js`, WebMCP execution, and `upload_file`, whose change event may auto-send) are unavailable on this protected route. Deterministic saved-workflow replay has no planner-owned recipient target, so a workflow with any potentially dispatching step scoped to a protected messaging route stops before page actions and directs the user to run a normal Act task with a named recipient; a per-step check also covers legacy workflows whose scope metadata is incomplete.
+
 ### Accessibility Tree (`accessibility-tree.js`)
 
 The primary page-interaction path. Produces a flat, indented text tree of the page where each node has a stable `ref_id`. Tools: `get_accessibility_tree`, `click_ax`, `type_ax`, `set_field`. See `docs/accessibility-tree-and-refs.md`.
@@ -802,7 +828,7 @@ Firefox uses `browser.storage.session`.
 | Events | CDP-trusted (`isTrusted=true`) | Synthetic (`isTrusted=false`) |
 | Screenshots | CDP `Page.captureScreenshot` with run-scoped focus emulation for background tabs | `browser.tabs.captureTab()` for direct inactive-tab capture |
 | Conversation/UI persistence | `chrome.storage.session` | `browser.storage.session` |
-| Offscreen document | Yes (fetch proxy + recorder) | Not available |
+| Offscreen document | Yes (fetch proxy + recorder + local WebGPU models) | Not available |
 | Trace recorder | IndexedDB (opt-in) | IndexedDB (opt-in) — same `trace/recorder.js` |
 | Duplicate-submit guard | Yes | Not available |
 | `execute_js` | Dev mode through CDP `Runtime.evaluate` | Dev mode through the MV2 content-script evaluator |
@@ -815,7 +841,9 @@ Firefox uses `browser.storage.session`.
 | Side panel | `sidePanel` API (MV3) | `sidebar_action` (MV2) |
 | File upload | CDP path or `downloadId` | `downloadId` re-fetch or WebBrain file picker; no arbitrary local path |
 
-Everything else (agent loop, tools, adapters, providers, loop detection, context management, system prompts) is architecturally identical between the two builds.
+Apart from the Chromium-only endpoint-free WebGPU provider and vision sidecar,
+the agent loop, tools, adapters, providers, loop detection, context management,
+and system prompts are architecturally identical between the two builds.
 
 ---
 
@@ -832,7 +860,7 @@ src/
 │       ├── cdp/      # CDP client (Chrome only)
 │       ├── content/  # accessibility-tree.js, content.js, ...
 │       ├── network/  # network-tools.js
-│       ├── offscreen/# Fetch proxy + slash-driven recorder (Chrome only)
+│       ├── offscreen/# Fetch proxy + recorder + local WebGPU models (Chrome only)
 │       ├── providers/# BaseLLMProvider + implementations
 │       ├── recorder/ # Recording orchestration
 │       ├── trace/    # IndexedDB recorder

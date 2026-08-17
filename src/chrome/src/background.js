@@ -1,4 +1,12 @@
 import { ProviderManager } from './providers/manager.js';
+import {
+  WEBGPU_MODEL_ID,
+  WEBGPU_VISION_AUTO_SELECTED_KEY,
+  WEBGPU_VISION_DOWNLOAD_STATE_KEY,
+  WEBGPU_VISION_DOWNLOAD_STATE_MESSAGE,
+  WEBGPU_VISION_ENABLED_KEY,
+  WEBGPU_VISION_MODEL_ID,
+} from './providers/webgpu.js';
 import { Agent } from './agent/agent.js';
 import {
   CUSTOM_SKILLS_STORAGE_KEY,
@@ -13,6 +21,7 @@ import {
   refreshBuiltInSkillRecord,
 } from './agent/skills.js';
 import { ScheduledJobManager } from './agent/scheduler.js';
+import { APOCALYPSE_DOWNLOAD_ALARM, APOCALYPSE_UPDATE_ALARM, createApocalypseController } from './agent/apocalypse-mode.js';
 import {
   compileWorkflowFromDemonstration,
   compileLatestSuccessfulWorkflow,
@@ -99,6 +108,80 @@ import {
  */
 
 const providerManager = new ProviderManager();
+const apocalypseController = createApocalypseController(chrome);
+const VISION_OFFSCREEN_URL = chrome.runtime.getURL('src/offscreen/offscreen.html');
+
+function normalizeVisionDownloadState(state) {
+  return {
+    modelId: String(state?.modelId || ''),
+    status: String(state?.status || 'idle'),
+    progress: Math.max(0, Math.min(100, Number(state?.progress) || 0)),
+    loaded: Math.max(0, Number(state?.loaded) || 0),
+    total: Math.max(0, Number(state?.total) || 0),
+    error: String(state?.error || '').slice(0, 500),
+    updatedAt: Date.now(),
+  };
+}
+
+async function persistVisionDownloadState(state) {
+  const normalized = normalizeVisionDownloadState(state);
+  await chrome.storage.local.set({ [WEBGPU_VISION_DOWNLOAD_STATE_KEY]: normalized });
+  if (normalized.status === 'error') {
+    const stored = await chrome.storage.local.get(WEBGPU_VISION_AUTO_SELECTED_KEY);
+    if (stored[WEBGPU_VISION_AUTO_SELECTED_KEY] === true) {
+      await chrome.storage.local.remove([
+        WEBGPU_VISION_ENABLED_KEY,
+        WEBGPU_VISION_AUTO_SELECTED_KEY,
+      ]);
+    }
+  } else if (normalized.status === 'ready') {
+    await chrome.storage.local.remove(WEBGPU_VISION_AUTO_SELECTED_KEY);
+  }
+  return normalized;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== WEBGPU_VISION_DOWNLOAD_STATE_MESSAGE) return false;
+  if (String(sender?.url || '') !== VISION_OFFSCREEN_URL) return false;
+  persistVisionDownloadState(message.state)
+    .then(state => sendResponse({ ok: true, state }))
+    .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
+  return true;
+});
+
+async function enableApocalypseVisionModel() {
+  const result = await providerManager.enableAndPreloadWebgpuVision();
+  if (result?.ok) return result;
+  await persistVisionDownloadState({
+    modelId: WEBGPU_VISION_MODEL_ID,
+    status: 'error',
+    progress: 0,
+    loaded: 0,
+    total: 0,
+    error: String(result?.error || 'The local vision model download could not be started.').slice(0, 500),
+    updatedAt: Date.now(),
+  }).catch(() => {});
+  return result;
+}
+
+async function resumeInterruptedVisionPreload() {
+  const stored = await chrome.storage.local.get([
+    WEBGPU_VISION_ENABLED_KEY,
+    WEBGPU_VISION_DOWNLOAD_STATE_KEY,
+  ]);
+  const state = stored[WEBGPU_VISION_DOWNLOAD_STATE_KEY];
+  const incomplete = state?.modelId === WEBGPU_VISION_MODEL_ID
+    && (state.status === 'starting' || state.status === 'downloading');
+  if (stored[WEBGPU_VISION_ENABLED_KEY] !== true || !incomplete) return { resumed: false };
+  return await enableApocalypseVisionModel();
+}
+Promise.all([
+  apocalypseController.syncUpdateSchedule(),
+  apocalypseController.syncDownloadSchedule(),
+  resumeInterruptedVisionPreload(),
+]).catch((error) => {
+  console.warn('[WebBrain] Apocalypse Mode startup work could not be restored:', error);
+});
 const agent = new Agent(providerManager);
 const ALWAYS_ALLOW_API_MUTATIONS_KEY = 'alwaysAllowApiMutations';
 const alwaysAllowApiMutationsReady = chrome.storage.local
@@ -605,12 +688,12 @@ function publicTeacherSession(session) {
 async function notifyTeacherState(tabId, session) {
   if (tabId == null) return false;
   try {
-    await chrome.tabs.sendMessage(tabId, {
+    const response = await chrome.tabs.sendMessage(tabId, {
       target: 'content',
       action: 'teacher_state',
       state: publicTeacherSession(session),
     });
-    return true;
+    return response?.teacherCaptureReady === true;
   } catch {
     return false;
   }
@@ -1068,6 +1151,19 @@ chrome.storage.onChanged.addListener((changes) => {
     });
   }
   if (refreshPrompts) agent._refreshSystemPrompts();
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name === APOCALYPSE_DOWNLOAD_ALARM) {
+    const releaseKeepalive = acquireRunKeepalive();
+    apocalypseController.manager.processNext().catch((error) => {
+      console.warn('[WebBrain] Apocalypse Mode archive download failed:', error);
+    }).finally(releaseKeepalive);
+  } else if (alarm?.name === APOCALYPSE_UPDATE_ALARM) {
+    apocalypseController.checkForUpdates().catch((error) => {
+      console.warn('[WebBrain] Apocalypse Mode update check failed:', error);
+    });
+  }
 });
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1732,6 +1828,24 @@ function launchDetachedRun(action, msg, sender) {
   return { ok: true, accepted: true, requestId };
 }
 
+async function standaloneRunProviderId(msg) {
+  const providerId = String(msg.providerId || '').trim();
+  if (!providerId) return null;
+  if (providerId !== 'webgpu' || msg.standaloneChat !== true) {
+    throw new Error('WebGPU is available only through the standalone chat control.');
+  }
+  const apocalypse = await apocalypseController.handle('status');
+  if (apocalypse?.enabled !== true) {
+    throw new Error('Enable Apocalypse Mode before using WebGPU in standalone chat.');
+  }
+  const config = providerManager.getAll().webgpu;
+  const download = await providerManager.getWebgpuDownloadStatus().catch(() => null);
+  if (config?.model !== WEBGPU_MODEL_ID || download?.ready !== true) {
+    throw new Error('Download LFM2.5 2.6B in Apocalypse Mode before using WebGPU in standalone chat.');
+  }
+  return providerId;
+}
+
 async function sendAgentRunComplete(tabId, snapshot = null) {
   if (tabId == null || !snapshot) return;
   const submittedTurnDurable = snapshot.kind === 'continue'
@@ -2147,6 +2261,24 @@ async function handleMessage(msg, sender) {
   }
 
   switch (msg.action) {
+    case 'apocalypse_mode': {
+      const snapshot = await apocalypseController.handle(msg.command, msg);
+      if (msg.command === 'enable') {
+        chrome.runtime.sendMessage({
+          type: 'apocalypse-mode-state',
+          enabled: snapshot.enabled === true,
+        }).catch(() => {});
+        if (msg.enabled === true) {
+          // The shared worker serializes model operations. Start the text
+          // transfer first so it is acknowledged immediately, then queue the
+          // vision preload behind it without blocking this enable response.
+          const textModel = await providerManager.enableAndStartWebgpuTextDownload();
+          const visionModel = await enableApocalypseVisionModel();
+          return { ...snapshot, textModel, visionModel };
+        }
+      }
+      return snapshot;
+    }
     case 'cloud_run':
       return await cloudRunController.startRun(msg);
     case 'cloud_workflow_compile':
@@ -2458,6 +2590,7 @@ async function handleMessage(msg, sender) {
     }
 
     case 'chat_start': {
+      await standaloneRunProviderId(msg);
       const claim = msg.contextMenuClaim;
       if (!claim?.promptId || !claim?.claimantId) {
         return launchDetachedRun('chat', msg, sender);
@@ -2494,11 +2627,16 @@ async function handleMessage(msg, sender) {
     }
 
     case 'continue_start':
+      await standaloneRunProviderId(msg);
       return launchDetachedRun('continue', msg, sender);
 
     case 'chat': {
       const tabId = msg.tabId || sender.tab?.id;
       if (!tabId) throw new Error('No tab ID');
+      if (msg.standaloneChat === true && msg.workflowId) {
+        throw new Error('Saved workflows are unavailable in standalone Ask mode.');
+      }
+      const runProviderId = await standaloneRunProviderId(msg);
       assertRunCanStart(tabId, msg);
       const isWorkflowRun = !!msg.workflowId;
       const mode = isWorkflowRun ? 'act' : (msg.mode || 'ask');
@@ -2551,6 +2689,8 @@ async function handleMessage(msg, sender) {
           ...(isWorkflowRun ? { independentRun: true } : {}),
           ...(msg.recommendedAction ? { recommendedAction: msg.recommendedAction } : {}),
           ...(msg.foreground ? { foreground: true } : {}),
+          ...(msg.standaloneChat === true ? { standaloneChat: true } : {}),
+          ...(runProviderId ? { providerId: runProviderId } : {}),
           ...(normalizeSelectionSourceGrounding(msg.sourceGrounding)
             ? {
               sourceGrounding: normalizeSelectionSourceGrounding(msg.sourceGrounding),
@@ -2669,6 +2809,7 @@ async function handleMessage(msg, sender) {
     case 'chat_stream': {
       const tabId = msg.tabId || sender.tab?.id;
       if (!tabId) throw new Error('No tab ID');
+      const runProviderId = await standaloneRunProviderId(msg);
       assertNoActiveTabRun(tabId);
       const mode = msg.mode || 'ask';
       const runUi = beginRunUiSnapshot(tabId, msg.requestId, {
@@ -2691,6 +2832,8 @@ async function handleMessage(msg, sender) {
         const runOptions = {
           ...(msg.recommendedAction ? { recommendedAction: msg.recommendedAction } : {}),
           ...(msg.foreground ? { foreground: true } : {}),
+          ...(msg.standaloneChat === true ? { standaloneChat: true } : {}),
+          ...(runProviderId ? { providerId: runProviderId } : {}),
           ...(normalizeSelectionSourceGrounding(msg.sourceGrounding)
             ? {
               sourceGrounding: normalizeSelectionSourceGrounding(msg.sourceGrounding),
@@ -2741,6 +2884,7 @@ async function handleMessage(msg, sender) {
     case 'continue': {
       const tabId = msg.tabId || sender.tab?.id;
       if (!tabId) throw new Error('No tab ID');
+      const runProviderId = await standaloneRunProviderId(msg);
       assertRunCanStart(tabId, msg);
       const mode = msg.mode || 'ask';
       const runUi = await beginContinuationRunUiSnapshot(tabId, msg.requestId, {
@@ -2763,6 +2907,7 @@ async function handleMessage(msg, sender) {
           sendAgentUpdate(tabId, runUi.requestId, type, data);
         }, mode, {
           ...(msg.foreground ? { foreground: true } : {}),
+          ...(runProviderId ? { providerId: runProviderId } : {}),
           detachedRequestId: runUi.requestId,
           isDetachedStartCancelled: () => isDetachedRunStartCancelled(tabId, msg),
           beforeConsequentialTool: () => flushRunUiSnapshot(tabId, runUi.requestId),
@@ -3129,7 +3274,21 @@ async function handleMessage(msg, sender) {
 
     // --- Provider Management ---
     case 'get_providers': {
-      return { providers: providerManager.getAll(), active: providerManager.activeProviderId };
+      const providers = providerManager.getAll();
+      delete providers.webgpu;
+      return { providers, active: providerManager.activeProviderId };
+    }
+
+    case 'get_standalone_webgpu_status': {
+      const apocalypse = await apocalypseController.handle('status');
+      const config = providerManager.getAll().webgpu;
+      const download = await providerManager.getWebgpuDownloadStatus().catch(() => null);
+      return {
+        ok: true,
+        enabled: apocalypse?.enabled === true,
+        ready: config?.model === WEBGPU_MODEL_ID && download?.ready === true,
+        status: download?.status || 'not-downloaded',
+      };
     }
 
     case 'get_active_prompt_tier': {
@@ -3143,6 +3302,9 @@ async function handleMessage(msg, sender) {
     }
 
     case 'set_active_provider': {
+      if (msg.providerId === 'webgpu') {
+        throw new Error('Use the nuclear WebGPU control in standalone chat.');
+      }
       await providerManager.setActive(msg.providerId);
       return { ok: true };
     }
@@ -3153,6 +3315,12 @@ async function handleMessage(msg, sender) {
       });
       return { ok: true };
     }
+
+    case 'duplicate_provider':
+      return await providerManager.duplicateProvider(msg.providerId);
+
+    case 'remove_duplicate_provider':
+      return await providerManager.removeDuplicateProvider(msg.providerId);
 
     case 'ollama_launch_handoff': {
       const handoff = normalizeOllamaLaunchHandoff(msg.handoff || {});
@@ -3171,9 +3339,45 @@ async function handleMessage(msg, sender) {
       return await providerManager.testProvider(msg.providerId);
     }
 
+    case 'get_webgpu_download_status':
+      return await providerManager.getWebgpuDownloadStatus();
+    case 'start_webgpu_download':
+      return await providerManager.startWebgpuDownload();
+    case 'pause_webgpu_download':
+      return await providerManager.pauseWebgpuDownload();
+    case 'stop_webgpu_download':
+      return await providerManager.stopWebgpuDownload();
+
     case 'test_vision_provider': {
       return await providerManager.testVisionProvider();
     }
+    case 'start_webgpu_vision_download': {
+      return await providerManager.startWebgpuVisionDownload();
+    }
+    case 'pause_webgpu_vision_download': {
+      const result = await providerManager.pauseWebgpuVisionDownload();
+      if (result?.ok) await persistVisionDownloadState({
+        ...result,
+        modelId: WEBGPU_VISION_MODEL_ID,
+        status: 'paused',
+      });
+      return result;
+    }
+    case 'stop_webgpu_vision_download': {
+      const result = await providerManager.stopWebgpuVisionDownload();
+      await persistVisionDownloadState({
+        ...result,
+        modelId: WEBGPU_VISION_MODEL_ID,
+        status: result?.ok ? 'not-downloaded' : 'error',
+        progress: 0,
+        loaded: 0,
+        total: 0,
+        error: result?.ok ? '' : result?.error,
+      });
+      return result;
+    }
+    case 'dispose_webgpu_vision':
+      return await providerManager.disposeWebgpuVisionRuntime();
 
     case 'test_transcription_provider': {
       return await providerManager.testTranscriptionProvider();

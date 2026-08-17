@@ -13,6 +13,7 @@ import {
   refreshBuiltInSkillRecord,
 } from './agent/skills.js';
 import { ScheduledJobManager } from './agent/scheduler.js';
+import { APOCALYPSE_DOWNLOAD_ALARM, APOCALYPSE_UPDATE_ALARM, createApocalypseController } from './agent/apocalypse-mode.js';
 import {
   compileWorkflowFromDemonstration,
   compileLatestSuccessfulWorkflow,
@@ -93,6 +94,13 @@ import {
  */
 
 const providerManager = new ProviderManager();
+const apocalypseController = createApocalypseController(browser);
+Promise.all([
+  apocalypseController.syncUpdateSchedule(),
+  apocalypseController.syncDownloadSchedule(),
+]).catch((error) => {
+  console.warn('[WebBrain] Apocalypse Mode schedules could not be restored:', error);
+});
 const agent = new Agent(providerManager);
 const ALWAYS_ALLOW_API_MUTATIONS_KEY = 'alwaysAllowApiMutations';
 const alwaysAllowApiMutationsReady = browser.storage.local
@@ -567,12 +575,12 @@ function publicTeacherSession(session) {
 async function notifyTeacherState(tabId, session) {
   if (tabId == null) return false;
   try {
-    await browser.tabs.sendMessage(tabId, {
+    const response = await browser.tabs.sendMessage(tabId, {
       target: 'content',
       action: 'teacher_state',
       state: publicTeacherSession(session),
     });
-    return true;
+    return response?.teacherCaptureReady === true;
   } catch {
     return false;
   }
@@ -1011,6 +1019,18 @@ browser.storage.onChanged.addListener((changes) => {
     });
   }
   if (refreshPrompts) agent._refreshSystemPrompts();
+});
+
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name === APOCALYPSE_DOWNLOAD_ALARM) {
+    apocalypseController.manager.processNext().catch((error) => {
+      console.warn('[WebBrain] Apocalypse Mode archive download failed:', error);
+    });
+  } else if (alarm?.name === APOCALYPSE_UPDATE_ALARM) {
+    apocalypseController.checkForUpdates().catch((error) => {
+      console.warn('[WebBrain] Apocalypse Mode update check failed:', error);
+    });
+  }
 });
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1943,6 +1963,8 @@ async function handleMessage(msg, sender) {
   }
 
   switch (msg.action) {
+    case 'apocalypse_mode':
+      return await apocalypseController.handle(msg.command, msg);
     case 'profile_sync_state': return { ok: true, ...(await profileSync.state()) };
     case 'profile_sync_auth_start': return { ok: true, ...(await profileSync.authStart(String(msg.email || '').trim())) };
     case 'profile_sync_auth_status': return { ok: true, ...(await profileSync.authStatus(msg.challengeId, msg.verifier)) };
@@ -2213,6 +2235,9 @@ async function handleMessage(msg, sender) {
     case 'chat': {
       const tabId = msg.tabId || sender.tab?.id;
       if (!tabId) throw new Error('No tab ID');
+      if (msg.standaloneChat === true && msg.workflowId) {
+        throw new Error('Saved workflows are unavailable in standalone Ask mode.');
+      }
       assertRunCanStart(tabId, msg);
       const isWorkflowRun = !!msg.workflowId;
       const mode = isWorkflowRun ? 'act' : (msg.mode || 'ask');
@@ -2253,6 +2278,7 @@ async function handleMessage(msg, sender) {
           ...(isWorkflowRun ? { independentRun: true } : {}),
           ...(msg.recommendedAction ? { recommendedAction: msg.recommendedAction } : {}),
           ...(msg.foreground ? { foreground: true } : {}),
+          ...(msg.standaloneChat === true ? { standaloneChat: true } : {}),
           ...(normalizeSelectionSourceGrounding(msg.sourceGrounding)
             ? {
               sourceGrounding: normalizeSelectionSourceGrounding(msg.sourceGrounding),
@@ -2388,6 +2414,7 @@ async function handleMessage(msg, sender) {
         const runOptions = {
           ...(msg.recommendedAction ? { recommendedAction: msg.recommendedAction } : {}),
           ...(msg.foreground ? { foreground: true } : {}),
+          ...(msg.standaloneChat === true ? { standaloneChat: true } : {}),
           ...(normalizeSelectionSourceGrounding(msg.sourceGrounding)
             ? {
               sourceGrounding: normalizeSelectionSourceGrounding(msg.sourceGrounding),
@@ -2835,6 +2862,12 @@ async function handleMessage(msg, sender) {
       });
       return { ok: true };
     }
+
+    case 'duplicate_provider':
+      return await providerManager.duplicateProvider(msg.providerId);
+
+    case 'remove_duplicate_provider':
+      return await providerManager.removeDuplicateProvider(msg.providerId);
 
     case 'ollama_launch_handoff': {
       const handoff = normalizeOllamaLaunchHandoff(msg.handoff || {});

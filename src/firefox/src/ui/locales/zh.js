@@ -1,7 +1,18 @@
 // Simplified Chinese (zh).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': '打开当前页面的原生打印对话框',
+  'sp.print.error': '无法打开打印对话框：{msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': '响应流已中断；正在以非流式方式重试本次 Ask。',
   'sp.providers.no_setup_group': '无需配置',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': '语言',
   'sp.btn.settings': '设置',
   "sp.btn.clear": "新对话",
+  'sp.btn.expand': '在新窗口中打开',
   'sp.btn.send': '发送',
   'sp.chat.follow_response': '跟随回答',
   'sp.chat.jump_latest': '跳到最新内容',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': '免费的每日 WebBrain Cloud 用量已包含在内。请求通过 api.webbrain.one 处理；默认情况下，我们仅记录用于配额和调试的元数据，不记录提示文本、页面内容、屏幕截图或模型响应。{privacyLink}。如需更多用量，请在 {subscribeLink} 订阅。在 {accountLink} 管理账单。',
   'st.providers.webbrain_note.privacy_link': '隐私政策',
   'st.providers.test': '测试连接',
+  'st.providers.duplicate': '复制',
+  'st.providers.duplicate_limit': '最多只能创建一个副本',
+  'st.providers.duplicate_unavailable': '此服务商不可复制',
+  'st.providers.duplicate_inactive': '请先保存此服务商，然后再复制',
+  'st.providers.remove_duplicate': '删除副本',
+  'st.providers.remove_duplicate_confirm': '要删除此服务商副本及其已保存的配置吗？',
   'st.providers.set_active': '设为启用',
   'st.providers.active': '已启用',
   'st.providers.saved': '已保存！',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': '草稿板已清除。',
   'sp.scratchpad.error': '草稿板不可用：{msg}',
   'sp.perm.verb.schedule': '为以下对象安排后续任务',
+  'sp.perm.verb.window': '调整浏览器窗口大小于',
   'tool.schedule_resume': '正在安排恢复',
   'tool.schedule_task': '正在安排任务',
   'st.display.scheduled_tasks.label': '定时任务',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': '搜索通用设置',
   'st.display.search.empty': '没有匹配的通用设置。',
   'st.display.advanced': '高级',
+  ...getApocalypseModeCopy('zh'),
+  ...getEmergencyBoxCopy('zh'),
+  'st.providers.webgpu_download.stopping': '正在停止并删除文件…',
+  'st.providers.webgpu_download.stop': '停止并删除',
   'st.display.clarify_timeout.label': '澄清超时',
   'st.display.clarify_timeout.desc': '等待澄清问题回复的时长；超时后自动选择第一个选项（若无选项则记为超时）。0 = 立即（始终自动选择）。超过 1200 秒为无限等待（关闭）。默认 60 秒。不适用于权限或表单提交确认。',
   'st.display.clarify_timeout.off': '关闭',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "将您的操作记录为已保存的工作流",
   "sp.slash.run_workflow": "按 ID 运行已保存的工作流",
   "sp.workflows.run_prompt": "运行已保存的工作流“{name}”",
+  "sp.workflows.standalone_unavailable": "此独立窗口仅支持“询问”模式。请在侧边栏中打开 WebBrain，以“操作”模式运行已保存的工作流。",
   "sp.workflows.parameters_for": "请输入“{name}”的参数。参数值仅用于本次运行。",
   "sp.workflows.parameter_required": "“{name}”为必填项。",
   "sp.slash.save_workflow": "保存最近一次成功且已记录的运行",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "使用该设备当前的 WebBrain 设置替换加密的云副本？",
   "st.sync.consent.legacy": "开启加密同步？ WebBrain 会将您的记忆、个人资料自动填充和 API 密钥提供商设置的端到端加密副本传输到 WebBrain Cloud。聊天历史记录和 OAuth 登录不同步。",
   "st.sync.consent.denied": "未授予加密同步权限。",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

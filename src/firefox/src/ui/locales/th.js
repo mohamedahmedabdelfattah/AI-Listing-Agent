@@ -1,7 +1,18 @@
 // Thai (th).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'เปิดกล่องโต้ตอบการพิมพ์ดั้งเดิมของหน้าปัจจุบัน',
+  'sp.print.error': 'ไม่สามารถเปิดกล่องโต้ตอบการพิมพ์ได้: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'การสตรีมคำตอบถูกขัดจังหวะ กำลังลอง Ask รอบนี้อีกครั้งโดยไม่ใช้สตรีม',
   'sp.providers.no_setup_group': 'ไม่ต้องตั้งค่า',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': 'ภาษา',
   'sp.btn.settings': 'การตั้งค่า',
   "sp.btn.clear": "การสนทนาใหม่",
+  'sp.btn.expand': 'เปิดในหน้าต่างใหม่',
   'sp.btn.send': 'ส่ง',
   'sp.chat.follow_response': 'ติดตามคำตอบ',
   'sp.chat.jump_latest': 'ไปยังล่าสุด',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': 'รวมการใช้งาน WebBrain Cloud รายวันฟรีไว้แล้ว คำขอจะผ่าน api.webbrain.one โดยค่าเริ่มต้นเราจะบันทึกข้อมูลเมตาสำหรับโควตาและการแก้จุดบกพร่อง ไม่ใช่ข้อความพรอมต์ เนื้อหาหน้าเว็บ ภาพหน้าจอ หรือการตอบกลับของโมเดล {privacyLink} หากต้องการใช้งานเพิ่มเติม สมัครสมาชิกที่ {subscribeLink} จัดการการเรียกเก็บเงินที่ {accountLink}',
   'st.providers.webbrain_note.privacy_link': 'นโยบายความเป็นส่วนตัว',
   'st.providers.test': 'ทดสอบการเชื่อมต่อ',
+  'st.providers.duplicate': 'ทำสำเนา',
+  'st.providers.duplicate_limit': 'อนุญาตให้มีสำเนาได้เพียงหนึ่งรายการ',
+  'st.providers.duplicate_unavailable': 'ไม่สามารถทำสำเนาผู้ให้บริการนี้ได้',
+  'st.providers.duplicate_inactive': 'บันทึกผู้ให้บริการนี้ก่อนทำสำเนา',
+  'st.providers.remove_duplicate': 'ลบสำเนา',
+  'st.providers.remove_duplicate_confirm': 'ลบผู้ให้บริการสำเนานี้และการตั้งค่าที่บันทึกไว้หรือไม่',
   'st.providers.set_active': 'ตั้งเป็นใช้งาน',
   'st.providers.active': 'ใช้งานอยู่',
   'st.providers.saved': 'บันทึกแล้ว!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': 'ล้างกระดานร่างแล้ว',
   'sp.scratchpad.error': 'ไม่สามารถใช้กระดานร่างได้: {msg}',
   'sp.perm.verb.schedule': 'ตั้งเวลางานในอนาคตสำหรับ',
+  'sp.perm.verb.window': 'ปรับขนาดหน้าต่างเบราว์เซอร์บน',
   'tool.schedule_resume': 'กำลังตั้งเวลาต่องาน',
   'tool.schedule_task': 'กำลังตั้งเวลางาน',
   'st.display.scheduled_tasks.label': 'งานที่ตั้งเวลาไว้',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': 'ค้นหาการตั้งค่าทั่วไป',
   'st.display.search.empty': 'ไม่พบการตั้งค่าทั่วไปที่ตรงกัน',
   'st.display.advanced': 'ขั้นสูง',
+  ...getApocalypseModeCopy('th'),
+  ...getEmergencyBoxCopy('th'),
+  'st.providers.webgpu_download.stopping': 'กำลังหยุดและลบไฟล์…',
+  'st.providers.webgpu_download.stop': 'หยุดและลบ',
   'st.display.clarify_timeout.label': 'หมดเวลา clarify',
   'st.display.clarify_timeout.desc': 'ระยะเวลารอคำตอบ clarify ก่อนเลือกตัวเลือกแรกอัตโนมัติ (หรือหมดเวลาหากไม่มีตัวเลือก) 0 = ทันที (เลือกอัตโนมัติเสมอ) เกิน 1200 วินาที = รอไม่จำกัด (ปิด) ค่าเริ่มต้น 60 วินาที ไม่ใช้กับสิทธิ์หรือการยืนยันส่งฟอร์ม',
   'st.display.clarify_timeout.off': 'ปิด',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "บันทึกการทำงานของคุณเป็นเวิร์กโฟลว์ที่บันทึกไว้",
   "sp.slash.run_workflow": "เรียกใช้เวิร์กโฟลว์ที่บันทึกไว้ด้วย ID",
   "sp.workflows.run_prompt": "เรียกใช้เวิร์กโฟลว์ที่บันทึกไว้ “{name}”",
+  "sp.workflows.standalone_unavailable": "หน้าต่างแยกนี้ใช้ได้เฉพาะโหมดถาม เปิด WebBrain ในแผงด้านข้างเพื่อเรียกใช้เวิร์กโฟลว์ที่บันทึกไว้ในโหมดลงมือทำ",
   "sp.workflows.parameters_for": "ป้อนพารามิเตอร์สำหรับ “{name}” ค่าจะใช้สำหรับการเรียกใช้ครั้งนี้เท่านั้น",
   "sp.workflows.parameter_required": "ต้องระบุ “{name}”",
   "sp.slash.save_workflow": "บันทึกการทำงานล่าสุดที่สำเร็จและมีการติดตาม",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "แทนที่สำเนาบนคลาวด์ที่เข้ารหัสด้วยการตั้งค่า WebBrain ปัจจุบันของอุปกรณ์นี้หรือไม่",
   "st.sync.consent.legacy": "เปิดการซิงค์ที่เข้ารหัสไหม WebBrain จะส่งสำเนาความทรงจำของคุณ การกรอกโปรไฟล์อัตโนมัติ และการตั้งค่าผู้ให้บริการคีย์ API ที่เข้ารหัสจากต้นทางถึงปลายทางไปยัง WebBrain Cloud ประวัติการแชทและการลงชื่อเข้าใช้ OAuth จะไม่ซิงค์กัน",
   "st.sync.consent.denied": "ไม่ได้รับสิทธิ์การซิงค์ที่เข้ารหัส",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

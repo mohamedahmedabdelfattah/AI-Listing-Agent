@@ -1,6 +1,7 @@
 import { BaseLLMProvider } from './base.js';
 import { fetchWithFallback } from './fetch-with-fallback.js';
 import {
+  isNewOpenAIContractConfig,
   isOfficialOpenAIConfig,
   shouldUseOpenAIResponsesApi,
   supportsOpenAIAskStreaming,
@@ -79,6 +80,11 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   get model() {
     if (this.config.model) return this.config.model;
     if (this.config.requiresModel) throw new Error(`${this.config.label || this.name} model is required.`);
+    // Some local servers apply their own default when no model is configured.
+    // Others carry `requiresModel: true` and throw above. Treat the category as
+    // the durable boundary so older/custom local entries never inherit a
+    // fabricated cloud model id merely because their provider name is unknown.
+    if (this.config.category === 'local') return null;
     return String(this.config.providerName || '').toLowerCase() === 'openai'
       && this._isOfficialOpenAIBaseUrl()
       ? 'gpt-5.6-terra'
@@ -128,6 +134,9 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   _headers() {
     const headers = { 'Content-Type': 'application/json' };
     const providerName = (this.config.providerName || '').toLowerCase();
+    if (this.config.requiresApiKey && !String(this.config.apiKey || '').trim()) {
+      throw new Error(`${this.config.label || this.name} API key is required.`);
+    }
     if (this.config.apiKey) {
       if (this.config.apiKeyHeader === 'x-goog-api-key') {
         headers['x-goog-api-key'] = String(this.config.apiKey);
@@ -157,18 +166,15 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
   }
 
   /**
-   * Newer OpenAI models (gpt-5, gpt-4.1+, o1, o3, o4) have a different API
-   * contract from the gpt-4o-and-earlier line:
-   *   - reject `max_tokens`, require `max_completion_tokens` instead
-   *   - reject any `temperature` other than the default (1)
-   * Local OpenAI-compatible servers and OpenRouter still use
-   * the legacy contract. Detect by model name + provider type.
+   * Newer OpenAI models (gpt-5 and the o-series) reject `max_tokens` and any
+   * non-default `temperature`, requiring `max_completion_tokens`. Detected by
+   * model id via the shared `isNewOpenAIContractModel` helper (also used by
+   * the settings Compatibility panel so the display and the wire contract
+   * stay in sync). Local OpenAI-compatible servers and LM Studio keep the
+   * legacy contract.
    */
   _isNewOpenAIContract() {
-    const m = (this.config.model || '').toLowerCase();
-    if (this.config.category === 'local') return false;
-    if (this.config.providerName === 'lmstudio') return false;
-    return /^(gpt-5|gpt-4\.1|o1|o3|o4)/.test(m);
+    return isNewOpenAIContractConfig(this.config);
   }
 
   _addMaxTokens(body, options) {
@@ -373,10 +379,10 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
    */
   _buildChatCompletionsBody(messages, options = {}, stream = false) {
     let body = {
-      model: this.model,
       messages: this._chatMessages(messages, options),
       stream,
     };
+    if (this.model) body.model = this.model;
     this._addTemperature(body, options);
     this._addMaxTokens(body, options);
     if (this._shouldSendTools(messages, options)) {
@@ -496,7 +502,6 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
 
   _responsesBody(messages, options, stream) {
     let body = {
-      model: this.model,
       input: this._responsesInput(messages),
       stream,
       store: false,
@@ -511,6 +516,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     if (body.reasoning.effort === 'auto' || body.reasoning.effort === 'off') {
       body.reasoning.effort = body.reasoning.effort === 'off' ? 'none' : 'medium';
     }
+    if (this.model) body.model = this.model;
 
     if (this._shouldSendTools(messages, options)) {
       body.tools = this._responsesTools(options.tools);
@@ -835,7 +841,13 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
             if (response.usage) {
               yield { type: 'usage', usage: this._normalizeResponsesUsage(response.usage) };
             }
-            yield { type: 'done', content: '', responseItems: response.output || [] };
+            const finishReason = response.finish_reason ?? response.stop_reason;
+            yield {
+              type: 'done',
+              content: '',
+              responseItems: response.output || [],
+              ...(finishReason != null ? { finishReason: String(finishReason) } : {}),
+            };
             return;
           } else if (event.type === 'response.incomplete') {
             // Incomplete is terminal (token limit / filter / etc.). Surface it
@@ -946,6 +958,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     let buffer = '';
     let finalUsage = null;
     let sawTerminalFinish = false;
+    let terminalFinishReason = '';
 
     while (true) {
       let chunk;
@@ -970,7 +983,11 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         const payload = trimmed.slice(6);
         if (payload === '[DONE]') {
           if (finalUsage) yield { type: 'usage', usage: finalUsage };
-          yield { type: 'done', content: '' };
+          yield {
+            type: 'done',
+            content: '',
+            ...(terminalFinishReason ? { finishReason: terminalFinishReason } : {}),
+          };
           return;
         }
         let json;
@@ -1009,6 +1026,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         }
         if (finishReason != null) {
           sawTerminalFinish = true;
+          terminalFinishReason = String(finishReason);
         }
         const delta = choice?.delta;
         const reasoningDelta = delta?.reasoning_content || delta?.reasoning;
@@ -1025,7 +1043,7 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     }
     if (finalUsage) yield { type: 'usage', usage: finalUsage };
     if (sawTerminalFinish) {
-      yield { type: 'done', content: '' };
+      yield { type: 'done', content: '', finishReason: terminalFinishReason };
       return;
     }
     if (this._supportsInteractiveAskStreaming()) {

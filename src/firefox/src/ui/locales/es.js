@@ -1,7 +1,18 @@
 // Spanish (es).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Abrir el diálogo de impresión nativo de la página actual',
+  'sp.print.error': 'No se pudo abrir el diálogo de impresión: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Se interrumpió la transmisión de la respuesta; reintentando este turno de Ask sin transmisión.',
   'sp.providers.no_setup_group': 'Sin configuración',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': 'Idioma',
   'sp.btn.settings': 'Ajustes',
   "sp.btn.clear": "Nueva conversación",
+  'sp.btn.expand': 'Abrir en una ventana nueva',
   'sp.btn.send': 'Enviar',
   'sp.chat.follow_response': 'Seguir respuesta',
   'sp.chat.jump_latest': 'Ir a lo más reciente',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': 'El uso diario gratuito de WebBrain Cloud está incluido. Las solicitudes pasan por api.webbrain.one; de forma predeterminada registramos metadatos para la cuota y la depuración, no el texto de las indicaciones, el contenido de la página, las capturas de pantalla ni las respuestas del modelo. {privacyLink}. Para más uso, suscríbete en {subscribeLink}. Gestiona la facturación en {accountLink}.',
   'st.providers.webbrain_note.privacy_link': 'Política de privacidad',
   'st.providers.test': 'Probar conexión',
+  'st.providers.duplicate': 'Duplicar',
+  'st.providers.duplicate_limit': 'Solo se permite un duplicado',
+  'st.providers.duplicate_unavailable': 'Este proveedor no se puede duplicar',
+  'st.providers.duplicate_inactive': 'Guarda este proveedor antes de duplicarlo',
+  'st.providers.remove_duplicate': 'Eliminar duplicado',
+  'st.providers.remove_duplicate_confirm': '¿Eliminar este proveedor duplicado y su configuración guardada?',
   'st.providers.set_active': 'Establecer activo',
   'st.providers.active': 'ACTIVO',
   'st.providers.saved': '¡Guardado!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': 'Bloc de notas borrado.',
   'sp.scratchpad.error': 'Bloc de notas no disponible: {msg}',
   'sp.perm.verb.schedule': 'programar trabajo futuro en',
+  'sp.perm.verb.window': 'cambiar el tamaño de la ventana del navegador en',
   'tool.schedule_resume': 'Programando reanudación',
   'tool.schedule_task': 'Programando tarea',
   'st.display.scheduled_tasks.label': 'Tareas programadas',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': 'Buscar en ajustes generales',
   'st.display.search.empty': 'No hay ajustes generales que coincidan.',
   'st.display.advanced': 'Avanzado',
+  ...getApocalypseModeCopy('es'),
+  ...getEmergencyBoxCopy('es'),
+  'st.providers.webgpu_download.stopping': 'Deteniendo y eliminando archivos…',
+  'st.providers.webgpu_download.stop': 'Detener y eliminar',
   'st.display.clarify_timeout.label': 'Tiempo de espera de aclaración',
   'st.display.clarify_timeout.desc': 'Cuánto esperar una respuesta a una pregunta de aclaración antes de elegir automáticamente la primera opción (o agotar el tiempo si no hay opciones). 0 = Instantáneo (autoelegir siempre). Valores por encima de 1200s esperan indefinidamente (Desactivado). Predeterminado 60s. No se aplica a permisos ni confirmaciones de envío de formularios.',
   'st.display.clarify_timeout.off': 'Desactivado',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "Graba tus acciones como un flujo de trabajo guardado",
   "sp.slash.run_workflow": "Ejecutar un flujo guardado por ID",
   "sp.workflows.run_prompt": "Ejecutar el flujo guardado «{name}»",
+  "sp.workflows.standalone_unavailable": "Esta ventana independiente solo admite el modo Preguntar. Abre WebBrain en el panel lateral para ejecutar flujos guardados en el modo Actuar.",
   "sp.workflows.parameters_for": "Introduce los parámetros de «{name}». Los valores solo se usan en esta ejecución.",
   "sp.workflows.parameter_required": "«{name}» es obligatorio.",
   "sp.slash.save_workflow": "Guardar la última ejecución registrada correctamente",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "¿Reemplazar la copia cifrada en la nube con la configuración actual de WebBrain de este dispositivo?",
   "st.sync.consent.legacy": "¿Activar sincronización cifrada? WebBrain transmitirá una copia cifrada de extremo a extremo de sus recuerdos, el autocompletado de perfiles y la configuración del proveedor de claves API a WebBrain Cloud. El historial de chat y los inicios de sesión de OAuth no están sincronizados.",
   "st.sync.consent.denied": "No se concedió el permiso de sincronización cifrada.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

@@ -1,7 +1,18 @@
 // Hebrew (he).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'פתיחת תיבת הדו־שיח המקורית להדפסת הדף הנוכחי',
+  'sp.print.error': 'לא ניתן לפתוח את תיבת הדו־שיח להדפסה: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'הזרמת התשובה נקטעה; מתבצע ניסיון חוזר לתור Ask הזה ללא הזרמה.',
   'sp.providers.no_setup_group': 'ללא הגדרה',
@@ -62,6 +73,7 @@ export default {
   "sp.btn.history": "היסטוריית צ'אט",
   "sp.btn.settings": "הגדרות",
   "sp.btn.clear": "שיחה חדשה",
+  'sp.btn.expand': 'פתיחה בחלון חדש',
   "sp.btn.send": "שלח",
   'sp.chat.follow_response': 'מעקב אחר התשובה',
   'sp.chat.jump_latest': 'מעבר לעדכון האחרון',
@@ -298,6 +310,7 @@ export default {
   "sp.perm.verb.download": "להוריד קבצים מ",
   "sp.perm.verb.upload": "להעלות קובץ ל",
   "sp.perm.verb.schedule": "לתזמן עבודה עתידית עבור",
+  "sp.perm.verb.window": "לשנות את גודל חלון הדפדפן באתר",
   "sp.step.details": "פרטים",
   "sp.step.input_label": "קלט",
   "sp.step.result_label": "תוצאה",
@@ -419,6 +432,7 @@ export default {
   "sp.slash.teach": "הקלטת הפעולות שלך כתהליך עבודה שמור",
   "sp.slash.run_workflow": "הפעלת תהליך עבודה שמור לפי מזהה",
   "sp.workflows.run_prompt": "הפעלת תהליך העבודה השמור „{name}”",
+  "sp.workflows.standalone_unavailable": "החלון העצמאי הזה מיועד למצב שאל בלבד. פתחו את WebBrain בחלונית הצד כדי להריץ תהליכי עבודה שמורים במצב פעולה.",
   "sp.workflows.parameters_for": "יש להזין פרמטרים עבור „{name}”. הערכים משמשים להרצה זו בלבד.",
   "sp.workflows.parameter_required": "„{name}” הוא שדה חובה.",
   "sp.slash.save_workflow": "שמירת ההרצה המוקלטת והמוצלחת האחרונה",
@@ -481,6 +495,10 @@ export default {
   "st.display.search.placeholder": "חפש בהגדרות כלליות",
   "st.display.search.empty": "אין הגדרות כלליות תואמות.",
   "st.display.advanced": "מִתקַדֵם",
+  ...getApocalypseModeCopy('he'),
+  ...getEmergencyBoxCopy('he'),
+  'st.providers.webgpu_download.stopping': 'עוצר ומסיר קבצים…',
+  'st.providers.webgpu_download.stop': 'עצירה והסרה',
   "st.display.clarify_timeout.label": "פסק זמן להבהרה",
   "st.display.clarify_timeout.desc": "כמה זמן להמתין לתשובה לשאלת הבהרה לפני בחירה אוטומטית של האפשרות הראשונה (או פקיעת זמן אם אין אפשרויות). 0 = מיידי (בחירה אוטומטית תמיד). מעל 1200 שנ׳ = המתנה ללא הגבלה (כבוי). ברירת מחדל 60 שנ׳. לא חל על הרשאות או אישורי שליחת טופס.",
   "st.display.clarify_timeout.off": "כבוי",
@@ -560,6 +578,12 @@ export default {
   "st.providers.search.empty": "אין ספקים שתואמים לחיפוש ולמסנן אלה.",
   "st.providers.save": "שמור",
   "st.providers.test": "בדיקת חיבור",
+  'st.providers.duplicate': 'שכפול',
+  'st.providers.duplicate_limit': 'מותר שכפול אחד בלבד',
+  'st.providers.duplicate_unavailable': 'לא ניתן לשכפל ספק זה',
+  'st.providers.duplicate_inactive': 'יש לשמור את הספק הזה לפני שכפולו',
+  'st.providers.remove_duplicate': 'הסרת השכפול',
+  'st.providers.remove_duplicate_confirm': 'להסיר את הספק המשוכפל ואת ההגדרות השמורות שלו?',
   "st.providers.set_active": "הגדר פעיל",
   "st.providers.active": "ACTIVE",
   "st.providers.saved": "נשמר!",
@@ -949,4 +973,5 @@ export default {
   "st.sync.confirm.reset": "האם להחליף את עותק הענן המוצפן בהגדרות WebBrain הנוכחיות של המכשיר הזה?",
   "st.sync.consent.legacy": "להפעיל סנכרון מוצפן? WebBrain ישדר עותק מוצפן מקצה לקצה של הזיכרונות, המילוי האוטומטי של הפרופיל והגדרות ספק מפתח ה-API שלך ל-WebBrain Cloud. היסטוריית הצ'אט וכניסות OAuth אינן מסונכרנות.",
   "st.sync.consent.denied": "הרשאת סנכרון מוצפן לא ניתנה.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

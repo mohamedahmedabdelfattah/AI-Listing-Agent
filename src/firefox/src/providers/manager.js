@@ -8,7 +8,6 @@ import { AwsBedrockProvider } from './aws-bedrock.js';
 import { ADDITIONAL_PROVIDER_DEFAULTS } from './provider-catalog.js';
 import { fetchWithTimeout } from './fetch-timeout.js';
 import {
-  AUTO_VISION_PROVIDER_IDS,
   VISION_MODES,
   parseLlamaCppVisionSupport,
   parseLmStudioVisionSupport,
@@ -42,7 +41,8 @@ import {
 } from './connection-test-assets.js';
 
 const WEBBRAIN_CLOUD_PROVIDER_ID = 'webbrain_cloud';
-const LOCAL_MODEL_LIST_PROVIDER_IDS = ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all'];
+const DUPLICATE_PROVIDER_SUFFIX = '__duplicate';
+const LOCAL_MODEL_LIST_PROVIDER_IDS = ['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy'];
 const WEBBRAIN_CLOUD_CONTEXT_WINDOW = 1000000;
 const WEBBRAIN_CLOUD_LEGACY_CONTEXT_WINDOW = 256000;
 const WEBBRAIN_DEVICE_GUID_KEY = 'webbrainDeviceGuid';
@@ -55,6 +55,30 @@ const SUPPORTED_PROVIDER_TYPES = new Set(['llamacpp', 'openai', 'azure_openai', 
 const SAFE_PROVIDER_ID_RE = /^[A-Za-z0-9_-]+$/;
 const ROUTER_PROVIDER_IDS = ['openrouter', 'cloudflare', 'nvidia', 'groq', 'huggingface', 'fireworks', 'together'];
 const PROVIDER_CREDENTIAL_KEYS = ['apiKey', 'accessKeyId', 'secretAccessKey', 'sessionToken'];
+const DUPLICATE_BLANK_CONFIG_KEYS = [
+  ...PROVIDER_CREDENTIAL_KEYS,
+  'baseUrl',
+  'model',
+  'contextWindow',
+  'apiVersion',
+  'region',
+  'accountId',
+  'gatewayId',
+  'resource',
+  'project',
+  'location',
+  'inputCostPerMillionUsd',
+  'cacheReadCostPerMillionUsd',
+  'cacheWriteCostPerMillionUsd',
+  'cacheWrite1hCostPerMillionUsd',
+  'outputCostPerMillionUsd',
+  'promptTier',
+  'visionMode',
+  'visionDetection',
+  'supportsVision',
+  'compat',
+  'extraBody',
+];
 const OLLAMA_VISION_MODES = new Set(['auto', 'on', 'off']);
 const OLLAMA_VISION_METADATA_TIMEOUT_MS = 3000;
 const VISION_METADATA_TIMEOUT_MS = 3000;
@@ -91,7 +115,7 @@ export class ProviderManager {
       || Object.hasOwn(rawStoredOllama, 'supportsVision')
     );
     const genericVisionConfigMigrated = Object.entries(data.providers || {}).some(([id, config]) => {
-      return !!visionProviderKind(id, config) && (
+      return !!visionProviderKind(config?.duplicateOf || id, config) && (
         !VISION_MODES.has(config.visionMode)
         || Object.hasOwn(config, 'supportsVision')
         || (!String(config.model || '').trim() && config.visionDetection != null)
@@ -120,6 +144,10 @@ export class ProviderManager {
         ...this._storedDefaultOverride(config, storedConfig),
         configured,
       };
+      if (Object.hasOwn(configs[id], 'duplicateOf')) {
+        delete configs[id].duplicateOf;
+        providerStateMigrated = true;
+      }
       if (storedConfig && !hasConfiguredMarker) providerStateMigrated = true;
     }
     for (const [id, config] of Object.entries(stored)) {
@@ -130,6 +158,12 @@ export class ProviderManager {
           configured: id !== WEBBRAIN_CLOUD_PROVIDER_ID && (config.configured === true || !hasConfiguredMarker),
         };
         if (!hasConfiguredMarker) providerStateMigrated = true;
+      }
+    }
+    for (const [id, config] of Object.entries(configs)) {
+      if (config.duplicateOf && !this._isValidDuplicateConfig(id, config, configs)) {
+        delete configs[id];
+        providerStateMigrated = true;
       }
     }
     delete configs.webbrain;
@@ -213,6 +247,7 @@ export class ProviderManager {
         category: 'local',
         label: 'Ollama (Local)',
         providerName: 'ollama',
+        requiresModel: true,
         baseUrl: 'http://localhost:11434/v1',
         model: '',
         contextWindow: 16384,
@@ -241,6 +276,7 @@ export class ProviderManager {
         category: 'local',
         label: 'Jan (Local)',
         providerName: 'jan',
+        requiresModel: true,
         baseUrl: 'http://localhost:1337/v1',
         model: '',
         contextWindow: 16384,
@@ -254,6 +290,7 @@ export class ProviderManager {
         category: 'local',
         label: 'vLLM (Local)',
         providerName: 'vllm',
+        requiresModel: true,
         baseUrl: 'http://localhost:8000/v1',
         model: '',
         contextWindow: 16384,
@@ -267,6 +304,7 @@ export class ProviderManager {
         category: 'local',
         label: 'SGLang (Local)',
         providerName: 'sglang',
+        requiresModel: true,
         baseUrl: 'http://localhost:30000/v1',
         model: '',
         contextWindow: 16384,
@@ -280,6 +318,7 @@ export class ProviderManager {
         category: 'local',
         label: 'LocalAI (Local)',
         providerName: 'localai',
+        requiresModel: true,
         baseUrl: 'http://localhost:8080/v1',
         model: '',
         contextWindow: 16384,
@@ -294,12 +333,28 @@ export class ProviderManager {
         category: 'local',
         label: 'GPT4All (Local)',
         providerName: 'gpt4all',
+        requiresModel: true,
         baseUrl: 'http://localhost:4891/v1',
         model: '',
         contextWindow: 16384,
         apiKey: '',
         supportsAskStreaming: true,
         supportsVision: true,
+        enabled: true,
+      },
+      local_openai_proxy: {
+        type: 'openai',
+        category: 'local',
+        label: 'Local OpenAI-compatible Proxy',
+        providerName: 'local-openai-proxy',
+        baseUrl: 'http://127.0.0.1:8317/v1',
+        model: '',
+        requiresModel: true,
+        contextWindow: 16384,
+        apiKey: '',
+        requiresApiKey: true,
+        supportsAskStreaming: true,
+        supportsVision: false,
         enabled: true,
       },
       azure_openai: {
@@ -608,22 +663,23 @@ export class ProviderManager {
         ...migrated.ollama,
         visionMode: OLLAMA_VISION_MODES.has(migrated.ollama.visionMode)
           ? migrated.ollama.visionMode
-          : (legacySupportsVision === false ? 'off' : 'auto'),
+          : (legacySupportsVision === true
+            ? 'on'
+            : (legacySupportsVision === false ? 'off' : 'auto')),
       };
       delete migrated.ollama.supportsVision;
     }
     for (const [id, config] of Object.entries(migrated)) {
-      if (!visionProviderKind(id, config)) continue;
+      if (!visionProviderKind(config.duplicateOf || id, config)) continue;
       const legacySupportsVision = config.supportsVision;
       const hasConfiguredModel = !!String(config.model || '').trim();
-      const isBuiltInAutoProvider = AUTO_VISION_PROVIDER_IDS.has(id);
       migrated[id] = {
         ...config,
         visionMode: VISION_MODES.has(config.visionMode)
           ? config.visionMode
           : (legacySupportsVision === false
             ? 'off'
-            : (legacySupportsVision === true && !isBuiltInAutoProvider ? 'on' : 'auto')),
+            : (legacySupportsVision === true ? 'on' : 'auto')),
         visionDetection: hasConfiguredModel ? (config.visionDetection || null) : null,
       };
       delete migrated[id].supportsVision;
@@ -686,6 +742,30 @@ export class ProviderManager {
       SUPPORTED_PROVIDER_TYPES.has(config.type);
   }
 
+  _providerDefinitionId(id, config = this.providers.get(id)?.config) {
+    return String(config?.duplicateOf || id || '');
+  }
+
+  _duplicateProviderId(id) {
+    return `${id}${DUPLICATE_PROVIDER_SUFFIX}`;
+  }
+
+  _canDuplicateProvider(id, config = this.providers.get(id)?.config) {
+    return !!config && !config.duplicateOf && id !== WEBBRAIN_CLOUD_PROVIDER_ID && config.type !== 'webgpu';
+  }
+
+  _isValidDuplicateConfig(id, config, configs) {
+    const sourceId = config?.duplicateOf;
+    const sourceConfig = configs[sourceId];
+    return typeof sourceId === 'string' &&
+      SAFE_PROVIDER_ID_RE.test(sourceId) &&
+      id === this._duplicateProviderId(sourceId) &&
+      !!sourceConfig &&
+      this._canDuplicateProvider(sourceId, sourceConfig) &&
+      sourceConfig.configured === true &&
+      sourceConfig.type === config.type;
+  }
+
   /**
    * Provider category for filter UI. See chrome/providers/manager.js for
    * the canonical doc. Categories: 'local' | 'cloud' | 'router'. Reads
@@ -695,12 +775,13 @@ export class ProviderManager {
   static categoryFor(id, config) {
     if (config && config.category) return config.category;
     if (config?.type === 'llamacpp') return 'local';
-    if (['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all'].includes(id)) return 'local';
+    if (['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang', 'localai', 'gpt4all', 'local_openai_proxy'].includes(id)) return 'local';
     if (ROUTER_PROVIDER_IDS.includes(id)) return 'router';
     return 'cloud';
   }
 
   _createProvider(id, config) {
+    const definitionId = this._providerDefinitionId(id, config);
     const normalizedConfig = {
       ...config,
       category: ProviderManager.categoryFor(id, config),
@@ -713,13 +794,16 @@ export class ProviderManager {
         'vertex_anthropic',
       ].includes(config.type),
     };
-    if (id === 'ollama') {
+    // Runtime-only identity for provider-specific conversation state. Keep it
+    // non-enumerable so it never leaks into storage, exports, or the settings UI.
+    Object.defineProperty(normalizedConfig, '_providerId', { value: String(id || '') });
+    if (definitionId === 'ollama') {
       normalizedConfig.visionMode = OLLAMA_VISION_MODES.has(normalizedConfig.visionMode)
         ? normalizedConfig.visionMode
         : 'auto';
       delete normalizedConfig.supportsVision;
     }
-    if (visionProviderKind(id, normalizedConfig)) {
+    if (visionProviderKind(definitionId, normalizedConfig)) {
       const legacySupportsVision = normalizedConfig.supportsVision;
       normalizedConfig.visionMode = VISION_MODES.has(normalizedConfig.visionMode)
         ? normalizedConfig.visionMode
@@ -824,7 +908,7 @@ export class ProviderManager {
 
   async ensureVisionCapability(id) {
     const provider = this.providers.get(id);
-    const providerKind = visionProviderKind(id, provider?.config);
+    const providerKind = visionProviderKind(this._providerDefinitionId(id, provider?.config), provider?.config);
     if (!provider || !providerKind) return { ok: false, skipped: true };
     const mode = VISION_MODES.has(provider.config.visionMode) ? provider.config.visionMode : 'auto';
     if (mode !== 'auto') return { ok: true, skipped: true, supportsVision: mode === 'on' };
@@ -847,7 +931,7 @@ export class ProviderManager {
       this._visionCapabilityChecks.delete(checkKey);
     }
     const current = this.providers.get(id);
-    const currentKind = visionProviderKind(id, current?.config);
+    const currentKind = visionProviderKind(this._providerDefinitionId(id, current?.config), current?.config);
     const currentIdentity = visionCapabilityIdentity(currentKind, current?.config);
     if (!current || current.config.visionMode !== 'auto'
       || currentKind !== providerKind
@@ -939,6 +1023,11 @@ export class ProviderManager {
       this._ollamaVisionChecks.set(identity.key, pending);
     }
     const result = await pending;
+    if (!result.ok && this._ollamaVisionChecks.get(identity.key) === pending) {
+      // A transient timeout, network failure, or malformed response must not
+      // pin this model to text-only for the background page's entire lifetime.
+      this._ollamaVisionChecks.delete(identity.key);
+    }
     const current = this.providers.get(id);
     const currentIdentity = this._ollamaVisionIdentity(current?.config);
     if (!current || current.config.visionMode !== 'auto' || currentIdentity?.key !== identity.key) {
@@ -968,9 +1057,12 @@ export class ProviderManager {
   }
 
   async prepareActiveProviderCapabilities() {
-    if (this.activeProviderId === 'ollama') return this.ensureOllamaVisionCapability('ollama');
     const activeProvider = this.providers.get(this.activeProviderId);
-    if (visionProviderKind(this.activeProviderId, activeProvider?.config)) {
+    const definitionId = this._providerDefinitionId(this.activeProviderId, activeProvider?.config);
+    if (definitionId === 'ollama') {
+      return this.ensureOllamaVisionCapability(this.activeProviderId);
+    }
+    if (visionProviderKind(definitionId, activeProvider?.config)) {
       return this.ensureVisionCapability(this.activeProviderId);
     }
     return { ok: true, skipped: true };
@@ -1024,12 +1116,16 @@ export class ProviderManager {
       throw new Error(`Provider not found: ${id}`);
     }
     const current = this.providers.get(id).config;
+    const updates = this._storedDefaultOverride(current, config);
+    for (const key of ['id', 'duplicateOf', 'sourceProviderId', 'isDuplicate', 'hasDuplicate', 'canDuplicate']) {
+      delete updates[key];
+    }
     const merged = {
       ...current,
-      ...this._storedDefaultOverride(current, config),
+      ...updates,
       configured: id !== WEBBRAIN_CLOUD_PROVIDER_ID && (markConfigured || current.configured === true),
     };
-    if (id === 'ollama') {
+    if (this._providerDefinitionId(id, current) === 'ollama') {
       merged.visionMode = OLLAMA_VISION_MODES.has(merged.visionMode) ? merged.visionMode : 'auto';
       delete merged.supportsVision;
       const currentIdentity = this._ollamaVisionIdentity(current);
@@ -1038,7 +1134,8 @@ export class ProviderManager {
         merged.visionDetection = null;
       }
     }
-    const genericVisionKind = visionProviderKind(id, merged);
+    const definitionId = this._providerDefinitionId(id, merged);
+    const genericVisionKind = visionProviderKind(definitionId, merged);
     if (genericVisionKind) {
       const explicitLegacyVision = Object.hasOwn(config, 'supportsVision') && !Object.hasOwn(config, 'visionMode')
         ? config.supportsVision
@@ -1047,7 +1144,7 @@ export class ProviderManager {
         ? (explicitLegacyVision ? 'on' : 'off')
         : (VISION_MODES.has(merged.visionMode) ? merged.visionMode : 'auto');
       delete merged.supportsVision;
-      const currentKind = visionProviderKind(id, current);
+      const currentKind = visionProviderKind(this._providerDefinitionId(id, current), current);
       const currentIdentity = visionCapabilityIdentity(currentKind, current);
       const nextIdentity = visionCapabilityIdentity(genericVisionKind, merged);
       if (currentKind !== genericVisionKind || currentIdentity?.key !== nextIdentity?.key || current.visionMode !== merged.visionMode) {
@@ -1063,18 +1160,111 @@ export class ProviderManager {
   }
 
   /**
+   * Create a fresh independently persisted instance of a configurable
+   * provider. The duplicate keeps its source definition ID so UIs can reuse
+   * the source card fields and branding, but it never inherits saved source
+   * settings or credentials.
+   */
+  async duplicateProvider(id) {
+    const source = this.providers.get(id);
+    if (!source) throw new Error(`Provider not found: ${id}`);
+    if (!this._canDuplicateProvider(id, source.config)) {
+      throw new Error(`Provider cannot be duplicated: ${id}`);
+    }
+    if (source.config.configured !== true) {
+      throw new Error(`Save provider before duplicating it: ${id}`);
+    }
+    const duplicateId = this._duplicateProviderId(id);
+    if (this.providers.has(duplicateId) || [...this.providers.values()].some(provider => provider.config?.duplicateOf === id)) {
+      throw new Error(`${source.config.label || id} already has a duplicate.`);
+    }
+
+    const baseline = this._defaultConfigs()[id];
+    if (!baseline || baseline.type !== source.config.type) {
+      throw new Error(`Provider definition not found: ${id}`);
+    }
+    const duplicateConfig = structuredClone(baseline);
+    for (const key of DUPLICATE_BLANK_CONFIG_KEYS) delete duplicateConfig[key];
+    duplicateConfig.duplicateOf = id;
+    duplicateConfig.label = `${baseline.label || id} 2`;
+    duplicateConfig.configured = false;
+    this.providers.set(duplicateId, this._createProvider(duplicateId, duplicateConfig));
+    try {
+      await this.save();
+    } catch (error) {
+      this.providers.delete(duplicateId);
+      throw error;
+    }
+    return { providerId: duplicateId, sourceProviderId: id };
+  }
+
+  /** Keep the persisted active ID valid when the selected duplicate disappears. */
+  async removeDuplicateProvider(id) {
+    const duplicate = this.providers.get(id);
+    if (!duplicate) throw new Error(`Provider not found: ${id}`);
+    const sourceId = duplicate.config?.duplicateOf;
+    if (!sourceId) throw new Error('Only duplicate providers can be removed.');
+
+    const previousActiveProviderId = this.activeProviderId;
+    this.providers.delete(id);
+    if (previousActiveProviderId === id) {
+      const source = this.providers.get(sourceId);
+      this.activeProviderId = source && (sourceId === WEBBRAIN_CLOUD_PROVIDER_ID || source.config?.configured === true)
+        ? sourceId
+        : WEBBRAIN_CLOUD_PROVIDER_ID;
+    }
+    try {
+      await this.save();
+    } catch (error) {
+      this.providers.set(id, duplicate);
+      this.activeProviderId = previousActiveProviderId;
+      throw error;
+    }
+    this._visionCapabilityEpochs.delete(id);
+    for (const key of this._visionCapabilityChecks.keys()) {
+      if (key.startsWith(`${id}\n`)) this._visionCapabilityChecks.delete(key);
+    }
+    return { removedProviderId: id, activeProviderId: this.activeProviderId };
+  }
+
+  /**
    * Get all provider configs for the settings UI. Each entry includes a
    * `category` field ('local' | 'cloud' | 'router') so the UI can filter
    * without re-deriving the classification.
    */
   getAll() {
     const result = {};
-    for (const [id, provider] of this.providers) {
+    const duplicatedSourceIds = new Set(
+      [...this.providers.values()].map(provider => provider.config?.duplicateOf).filter(Boolean),
+    );
+    const duplicateEntriesBySourceId = new Map();
+    for (const entry of this.providers) {
+      const sourceId = entry[1].config?.duplicateOf;
+      if (sourceId) duplicateEntriesBySourceId.set(sourceId, entry);
+    }
+    const orderedEntries = [];
+    for (const entry of this.providers) {
+      const [id, provider] = entry;
+      if (provider.config?.duplicateOf) continue;
+      orderedEntries.push(entry);
+      const duplicateEntry = duplicateEntriesBySourceId.get(id);
+      if (duplicateEntry) orderedEntries.push(duplicateEntry);
+    }
+    for (const entry of duplicateEntriesBySourceId.values()) {
+      if (!this.providers.has(entry[1].config?.duplicateOf)) orderedEntries.push(entry);
+    }
+    for (const [id, provider] of orderedEntries) {
       const config = provider.config;
+      const isDuplicate = !!config.duplicateOf;
+      const hasDuplicate = !isDuplicate && duplicatedSourceIds.has(id);
       result[id] = {
         id,
         ...config,
         category: ProviderManager.categoryFor(id, config),
+        sourceProviderId: this._providerDefinitionId(id, config),
+        isDuplicate,
+        hasDuplicate,
+        canDuplicate: this._canDuplicateProvider(id, config) && !hasDuplicate,
       };
     }
     return result;
@@ -1128,21 +1318,27 @@ export class ProviderManager {
     const messages = [{
       role: 'user',
       content: [
-        { type: 'text', text: 'Read the three-character black code centered in the attached image. Reply with only that code.' },
         { type: 'image_url', image_url: { url: imageDataUrl } },
+        { type: 'text', text: 'Read the three-character black code centered in the attached image. Reply with only that code.' },
       ],
     }];
     let attempts = 1;
     let reasoningControl = true;
     let result;
     try {
-      result = await provider.chat(messages, visionGenerationOptions(256, { reasoningControl }));
+      result = await provider.chat(messages, {
+        ...visionGenerationOptions(256, { reasoningControl }),
+        webbrainVisionProbe: true,
+      });
     } catch (error) {
       if (!unsupportedVisionGenerationControl(error)) return { ok: false, error: error.message };
       reasoningControl = false;
       attempts++;
       try {
-        result = await provider.chat(messages, visionGenerationOptions(800, { reasoningControl }));
+        result = await provider.chat(messages, {
+          ...visionGenerationOptions(800, { reasoningControl }),
+          webbrainVisionProbe: true,
+        });
       } catch (fallbackError) {
         return { ok: false, error: fallbackError.message };
       }
@@ -1150,7 +1346,10 @@ export class ProviderManager {
     if (!String(result?.content || '').trim() && attempts === 1) {
       attempts++;
       try {
-        result = await provider.chat(messages, visionGenerationOptions(800, { reasoningControl }));
+        result = await provider.chat(messages, {
+          ...visionGenerationOptions(800, { reasoningControl }),
+          webbrainVisionProbe: true,
+        });
       } catch (error) {
         return { ok: false, error: error.message };
       }
@@ -1160,7 +1359,11 @@ export class ProviderManager {
       return { ok: false, error: 'Vision model returned no visible description after the image probe.' };
     }
     if (!/\bWB7\b/i.test(probeText)) {
-      return { ok: false, error: 'Vision model responded but did not read the image probe correctly.' };
+      const observed = probeText.replace(/\s+/g, ' ').slice(0, 120);
+      return {
+        ok: false,
+        error: `Vision model responded but did not read the image probe correctly (received: "${observed}").`,
+      };
     }
     return { ok: true, model: provider.model, baseUrl: provider.baseUrl };
   }
@@ -1228,14 +1431,19 @@ export class ProviderManager {
 
   /**
    * Fetch selectable models for local providers. Ollama uses its native
-   * /api/tags endpoint; llama.cpp, LM Studio, Jan, vLLM, SGLang, and LocalAI use
+   * /api/tags endpoint; llama.cpp, LM Studio, Jan, vLLM, SGLang, LocalAI,
+   * GPT4All, and generic local proxies use
    * OpenAI-compatible /v1/models.
    */
   async listProviderModels(id) {
     const provider = this.providers.get(id);
     if (!provider) return { ok: false, error: 'Provider not found' };
-    if (!LOCAL_MODEL_LIST_PROVIDER_IDS.includes(id)) {
+    const definitionId = this._providerDefinitionId(id, provider.config);
+    if (!LOCAL_MODEL_LIST_PROVIDER_IDS.includes(definitionId)) {
       return { ok: false, error: 'Model loading is only supported for local providers' };
+    }
+    if (provider.config.requiresApiKey && !String(provider.config.apiKey || '').trim()) {
+      return { ok: false, error: `${provider.config.label || provider.name} API key is required` };
     }
 
     const observedBaseUrl = provider.config.baseUrl;
@@ -1252,7 +1460,7 @@ export class ProviderManager {
     // Studio), we fall through to /v1/models below.
     const headers = this._modelListHeaders(provider);
 
-    if (id === 'lmstudio') {
+    if (definitionId === 'lmstudio') {
       const host = rawBaseUrl.replace(/\/v1\/?$/, '');
       try {
         const res = await fetch(`${host}/api/v0/models`, { method: 'GET', headers });
@@ -1274,8 +1482,8 @@ export class ProviderManager {
     }
 
     let firstFailure = null;
-    for (const candidate of this._modelListCandidates(id, rawBaseUrl)) {
-      const url = id === 'ollama' ? `${candidate.requestBaseUrl}/api/tags` : `${candidate.requestBaseUrl}/models`;
+    for (const candidate of this._modelListCandidates(definitionId, rawBaseUrl)) {
+      const url = definitionId === 'ollama' ? `${candidate.requestBaseUrl}/api/tags` : `${candidate.requestBaseUrl}/models`;
       try {
         const res = await fetch(url, { method: 'GET', headers });
         if (!res.ok) {
@@ -1286,7 +1494,7 @@ export class ProviderManager {
             // the other local providers sharing this path (llamacpp,
             // lmstudio, jan, vllm, sglang, localai) a 403 means something
             // else (auth proxy, --api-key, ...), so report it generically.
-            if (!firstFailure) firstFailure = id === 'ollama'
+            if (!firstFailure) firstFailure = definitionId === 'ollama'
               ? {
                   ok: false,
                   error:
@@ -1299,7 +1507,7 @@ export class ProviderManager {
           continue;
         }
         const data = await res.json();
-        const models = this._extractModelIds(id, data);
+        const models = this._extractModelIds(definitionId, data);
         const result = { ok: true, models };
         if (candidate.configBaseUrl !== observedBaseUrl) {
           if (await this._updateProviderBaseUrl(id, candidate.configBaseUrl, observedBaseUrl)) {
@@ -1453,7 +1661,8 @@ export class ProviderManager {
   }
 
   async _attachDetectedContextWindow(id, provider, result, options = {}) {
-    if (!result?.ok || !LOCAL_MODEL_LIST_PROVIDER_IDS.includes(id)) return result;
+    const definitionId = this._providerDefinitionId(id, provider?.config);
+    if (!result?.ok || !LOCAL_MODEL_LIST_PROVIDER_IDS.includes(definitionId)) return result;
     const observed = {
       model: provider?.config?.model,
       baseUrl: provider?.config?.baseUrl,
@@ -1480,17 +1689,18 @@ export class ProviderManager {
    * came from live/runtime allocation (safe to shrink a manual override).
    */
   async _detectLocalContextWindow(id, provider, options = {}) {
-    if (!LOCAL_MODEL_LIST_PROVIDER_IDS.includes(id)) return null;
+    const definitionId = this._providerDefinitionId(id, provider?.config);
+    if (!LOCAL_MODEL_LIST_PROVIDER_IDS.includes(definitionId)) return null;
     const headers = this._modelListHeaders(provider);
     const rawBaseUrl = String(options.requestBaseUrl || provider?.config?.baseUrl || '')
       .trim()
       .replace(/\/+$/, '');
-    if (!rawBaseUrl && id !== 'lmstudio') return null;
+    if (!rawBaseUrl && definitionId !== 'lmstudio') return null;
     const root = rawBaseUrl.replace(/\/v1$/i, '');
     const model = String(options.model || provider?.config?.model || '').trim();
 
     try {
-      if (id === 'lmstudio') {
+      if (definitionId === 'lmstudio') {
         const payload = options.lmStudioData || null;
         let data = payload;
         if (!data) {
@@ -1508,7 +1718,7 @@ export class ProviderManager {
         };
       }
 
-      if (id === 'llamacpp') {
+      if (definitionId === 'llamacpp') {
         const res = await fetch(`${root}/props`, { method: 'GET', headers });
         if (!res.ok) return null;
         const contextWindow = parseLlamaCppPropsContextWindow(await res.json());
@@ -1516,7 +1726,7 @@ export class ProviderManager {
         return { contextWindow, shrinkOverride: true };
       }
 
-      if (id === 'ollama') {
+      if (definitionId === 'ollama') {
         // Prefer live allocated context from /api/ps (honors runtime num_ctx /
         // OLLAMA_CONTEXT_LENGTH). Fall back to /api/show num_ctx — never the
         // architecture max in model_info.*.context_length (overstates).
@@ -1542,7 +1752,7 @@ export class ProviderManager {
         return { contextWindow, shrinkOverride: false };
       }
 
-      if (id === 'vllm' || id === 'sglang') {
+      if (definitionId === 'vllm' || definitionId === 'sglang') {
         let data = options.modelListData || null;
         if (!data) {
           const openAiBase = /\/v1$/i.test(rawBaseUrl) ? rawBaseUrl : `${root}/v1`;
@@ -1555,7 +1765,7 @@ export class ProviderManager {
         return { contextWindow, shrinkOverride: true };
       }
 
-      if (id === 'localai') {
+      if (definitionId === 'localai') {
         if (!model) return null;
         const res = await fetch(`${root}/api/models/config-json/${encodeURIComponent(model)}`, {
           method: 'GET',

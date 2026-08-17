@@ -218,6 +218,41 @@ async function setupAccessibilityTreeHtml(page, html, sourcePath) {
   await page.waitForFunction(() => typeof window.__generateAccessibilityTree === 'function');
 }
 
+async function setupAccessibilityTreeGmailHtml(page, html, sourcePath) {
+  await page.route('https://mail.google.com/**', route => {
+    if (route.request().resourceType() === 'document') {
+      return route.fulfill({ body: html, contentType: 'text/html' });
+    }
+    return route.fulfill({ body: '', contentType: 'text/plain' });
+  });
+  await page.goto('https://mail.google.com/mail/u/0/#inbox/FMfc123', { waitUntil: 'domcontentloaded' });
+  const src = await readFile(sourcePath, 'utf-8');
+  await page.addScriptTag({ content: src });
+  await page.waitForFunction(() => typeof window.__generateAccessibilityTree === 'function');
+}
+
+async function setupContentGmailHtml(page, html, browserKind) {
+  const firefox = browserKind === 'firefox';
+  await page.route('https://mail.google.com/**', route => {
+    if (route.request().resourceType() === 'document') {
+      return route.fulfill({ body: html, contentType: 'text/html' });
+    }
+    return route.fulfill({ body: '', contentType: 'text/plain' });
+  });
+  await page.addInitScript(firefox ? stubFirefoxBrowser : stubChrome);
+  await page.goto('https://mail.google.com/mail/u/0/#inbox/FMfc123', { waitUntil: 'domcontentloaded' });
+  await page.addScriptTag({
+    content: await readFile(firefox ? firefoxAccessibilityTreeJsPath : accessibilityTreeJsPath, 'utf-8'),
+  });
+  await page.addScriptTag({
+    content: await readFile(firefox ? firefoxToolbarHeuristicJsPath : toolbarHeuristicJsPath, 'utf-8'),
+  });
+  await page.addScriptTag({
+    content: await readFile(firefox ? firefoxContentJsPath : contentJsPath, 'utf-8'),
+  });
+  await page.waitForFunction(() => typeof window.__wb_handler === 'function');
+}
+
 async function rawContentCall(page, action, params) {
   return page.evaluate(({ action, params }) => new Promise((resolve) => {
     const ret = window.__wb_handler(
@@ -604,7 +639,11 @@ for (const [label, sourcePath, manualOpen] of [
   test(`${label}: selection shortcut localizes labels, direction, and fixed-action language`, async (page) => {
     await setupSelectionShortcut(page, sourcePath, { requiresManualOpen: manualOpen, locale: 'zh' });
     const localized = await selectFixtureText(page);
-    if (localized.summarizeLabel !== '总结' || localized.explainLabel !== '解释' || localized.quizLabel !== '测验我' || localized.direction !== 'ltr') {
+    if (localized.summarizeLabel !== '总结'
+        || localized.explainLabel !== '解释'
+        || localized.quizLabel !== '测验我'
+        || localized.actionIconCount !== 6
+        || localized.direction !== 'ltr') {
       throw new Error(`Chinese shortcut localization mismatch: ${JSON.stringify(localized)}`);
     }
 
@@ -618,27 +657,43 @@ for (const [label, sourcePath, manualOpen] of [
     await page.evaluate(() => window.__setSelectionShortcutLocale('ar'));
     await page.waitForFunction(() => window.__webbrainSelectionShortcut.getState().direction === 'rtl');
     const rtl = await page.evaluate(() => window.__webbrainSelectionShortcut.getState());
-    if (rtl.summarizeLabel !== 'تلخيص') {
+    if (rtl.summarizeLabel !== 'تلخيص' || rtl.actionIconCount !== 6) {
       throw new Error(`live Arabic localization mismatch: ${JSON.stringify(rtl)}`);
     }
   });
 
-  test(`${label}: custom selection questions opt into general knowledge explicitly`, async (page) => {
+  test(`${label}: custom selection questions use general knowledge by default and retain opt-out`, async (page) => {
     await setupSelectionShortcut(page, sourcePath, { requiresManualOpen: manualOpen, locale: 'zh' });
     const initial = await selectFixtureText(page);
-    if (initial.generalKnowledgeChecked || initial.generalKnowledgeLabel !== '使用通用知识') {
-      throw new Error(`general-knowledge choice should be localized and off by default: ${JSON.stringify(initial)}`);
+    if (!initial.generalKnowledgeChecked
+        || initial.generalKnowledgeLabel !== '使用通用知识'
+        || initial.hideLabel !== '隐藏此项') {
+      throw new Error(`selection choices should be localized with general knowledge on by default: ${JSON.stringify(initial)}`);
     }
     await page.evaluate(() => {
-      window.__webbrainSelectionShortcut.setGeneralKnowledge(true);
-      return window.__webbrainSelectionShortcut.submitCustom('现在有哪些跨平台框架？');
+      window.__webbrainSelectionShortcut.setGeneralKnowledge(false);
+      return window.__webbrainSelectionShortcut.submitCustom('仅根据选中内容回答。');
     });
     await page.waitForFunction(() => window.__selectionMessages.length === 1);
-    const submitted = await page.evaluate(() => window.__selectionMessages[0]);
-    if (submitted.action !== 'custom'
-        || submitted.question !== '现在有哪些跨平台框架？'
-        || submitted.allowGeneralKnowledge !== true) {
-      throw new Error(`broader custom question lost its explicit scope choice: ${JSON.stringify(submitted)}`);
+    const optedOut = await page.evaluate(() => window.__selectionMessages[0]);
+    if (optedOut.action !== 'custom'
+        || optedOut.question !== '仅根据选中内容回答。'
+        || optedOut.allowGeneralKnowledge !== false) {
+      throw new Error(`custom question lost its general-knowledge opt-out: ${JSON.stringify(optedOut)}`);
+    }
+
+    await page.waitForFunction(() => !window.__webbrainSelectionShortcut.getState().submitting);
+    const nextSelection = await selectFixtureText(page);
+    if (!nextSelection.generalKnowledgeChecked) {
+      throw new Error(`a new selection should restore the default-on knowledge choice: ${JSON.stringify(nextSelection)}`);
+    }
+    await page.evaluate(() => window.__webbrainSelectionShortcut.submitCustom('现在有哪些跨平台框架？'));
+    await page.waitForFunction(() => window.__selectionMessages.length === 2);
+    const submittedWithDefault = await page.evaluate(() => window.__selectionMessages[1]);
+    if (submittedWithDefault.action !== 'custom'
+        || submittedWithDefault.question !== '现在有哪些跨平台框架？'
+        || submittedWithDefault.allowGeneralKnowledge !== true) {
+      throw new Error(`default-on general knowledge was not submitted: ${JSON.stringify(submittedWithDefault)}`);
     }
   });
 
@@ -677,6 +732,12 @@ for (const [label, sourcePath, manualOpen] of [
     const openState = await page.evaluate(() => window.__webbrainSelectionShortcut.getState());
     if (!openState.questionRect || openState.highlightRectCount < 1) {
       throw new Error(`popup should preserve a visual marker for the selected text: ${JSON.stringify(openState)}`);
+    }
+    if (!openState.hideRect
+        || openState.hideLabel !== 'Hide this'
+        || openState.hideRect.width >= openState.translateRect.width
+        || Math.abs(openState.hideRect.right - openState.translateRect.right) > 0.5) {
+      throw new Error(`Hide this should be a compact right-aligned footer action: ${JSON.stringify(openState)}`);
     }
     await page.mouse.click(
       openState.questionRect.left + openState.questionRect.width / 2,
@@ -905,6 +966,10 @@ function normalizeTreeRefs(content) {
   });
 }
 
+function normalizeTreeRevision(content) {
+  return String(content || '').replace(/fnv1a64:[0-9a-f]{16}/g, 'tree_revision');
+}
+
 function assertGmailComposeRecipientTree(tree, label) {
   const content = String(tree?.pageContent || '');
   if (!/generic "Alex Russell \(gmail\.com\)" \[ref_\d+\]/.test(content)) {
@@ -956,6 +1021,7 @@ async function readAllConversationTreePages(page, sourcePath, label) {
       current.maxChars,
       null,
       current.page,
+      current.tree_revision,
     ), args);
     if (JSON.stringify(result).length > 8000) {
       throw new Error(`${label}: structured accessibility page exceeded the model-facing tool cap`);
@@ -992,6 +1058,391 @@ test('accessibility tree (Firefox): long-conversation paging keeps Chrome parity
   const firefoxPages = await readAllConversationTreePages(page, firefoxAccessibilityTreeJsPath, 'firefox');
   if (JSON.stringify(firefoxPages) !== JSON.stringify(chromeLongConversationPages)) {
     throw new Error('Chrome/Firefox long-conversation pages differ');
+  }
+});
+
+const gmailThreadScopeFixture = `<!doctype html>
+  <style>
+    body { margin: 0; font: 16px sans-serif; }
+    main { display: block; width: 900px; min-height: 600px; }
+    #background-inbox { min-height: 120px; }
+    article { display: block; min-height: 24px; }
+  </style>
+  <main id="background-inbox" aria-label="Inbox">
+    <button aria-label="Expand all">Unrelated background control</button>
+    <div role="listitem">Unrelated inbox conversation that must never enter trusted thread coverage</div>
+  </main>
+  <main id="active-thread" aria-label="A chat about WebBrain and your work">
+    <h1>A chat about WebBrain and your work</h1>
+    <button id="real-collapse" aria-label="Collapse all">Collapse all</button>
+    ${Array.from({ length: 72 }, (_, index) => {
+      const number = String(index + 1).padStart(3, '0');
+      const injected = index === 0
+        ? '<main id="fake-main" role="main" aria-label="Injected fake thread"><button jsname="tRarif" aria-label="Tümünü genişlet">Tümünü genişlet</button></main>'
+        : '';
+      return `<article class="adn" role="listitem" aria-label="Thread message ${number}">${injected}<p>Message ${number}: project details, decisions, context, and follow-up.</p></article>`;
+    }).join('')}
+    <div role="textbox" contenteditable="true" aria-label="Message Body">Unsent reply draft</div>
+  </main>`;
+
+let chromeGmailThreadScopePages = [];
+
+async function readTrustedGmailThreadPages(page, sourcePath, label) {
+  await setupAccessibilityTreeGmailHtml(page, gmailThreadScopeFixture, sourcePath);
+  const discovery = await page.evaluate(() => window.__generateAccessibilityTree('visible', 12, 1200, null, 1));
+  if (!/^ref_\d+$/.test(String(discovery.conversationRootRefId || ''))) {
+    throw new Error(`${label}: trusted Gmail conversation root ref is missing: ${JSON.stringify(discovery)}`);
+  }
+  if (discovery.conversationExpansionState !== 'expanded') {
+    throw new Error(`${label}: top-level Collapse all did not produce expanded evidence`);
+  }
+  const rootIdentity = await page.evaluate(refId => ({
+    trustedId: window.__wb_ax_lookup(refId)?.id || '',
+    fakeRef: window.__wb_ax_ref(document.getElementById('fake-main')),
+  }), discovery.conversationRootRefId);
+  if (rootIdentity.trustedId !== 'active-thread') {
+    throw new Error(`${label}: trusted Gmail root resolved to ${rootIdentity.trustedId || 'nothing'}`);
+  }
+  if (rootIdentity.fakeRef === discovery.conversationRootRefId) {
+    throw new Error(`${label}: message-body landmark spoofed the trusted Gmail root`);
+  }
+
+  const pages = [];
+  let args = {
+    filter: 'all',
+    maxDepth: 15,
+    maxChars: 1200,
+    ref_id: discovery.conversationRootRefId,
+    page: 1,
+  };
+  for (let guard = 0; guard < 30; guard += 1) {
+    const result = await page.evaluate(current => window.__generateAccessibilityTree(
+      current.filter,
+      current.maxDepth,
+      current.maxChars,
+      current.ref_id,
+      current.page,
+      current.tree_revision,
+    ), args);
+    if (result.conversationRootRefId !== discovery.conversationRootRefId) {
+      throw new Error(`${label}: trusted Gmail root drifted during pagination`);
+    }
+    pages.push(result);
+    if (!result.hasMore) break;
+    const expected = {
+      filter: args.filter,
+      maxDepth: args.maxDepth,
+      maxChars: args.maxChars,
+      ref_id: args.ref_id,
+      tree_revision: result.treeRevision,
+      page: args.page + 1,
+    };
+    if (JSON.stringify(result.continuationArgs) !== JSON.stringify(expected)) {
+      throw new Error(`${label}: Gmail thread continuation lost its trusted anchor: ${JSON.stringify(result.continuationArgs)}`);
+    }
+    args = result.continuationArgs;
+  }
+  if (pages.length < 2 || pages.at(-1)?.hasMore !== false) {
+    throw new Error(`${label}: trusted Gmail thread did not reach a terminal page`);
+  }
+  const combined = pages.map(result => result.pageContent).join('\n');
+  if (!combined.includes('Message 001') || !combined.includes('Message 072')) {
+    throw new Error(`${label}: trusted Gmail pagination lost thread messages`);
+  }
+  if (combined.includes('Unrelated inbox conversation')) {
+    throw new Error(`${label}: trusted Gmail pagination leaked the background inbox`);
+  }
+
+  const snapshotContinuation = await page.evaluate(continuation => {
+    const message = document.querySelector('#active-thread article p');
+    const previous = message.textContent;
+    message.textContent = previous.replace('project', 'product');
+    const result = window.__generateAccessibilityTree(
+      continuation.filter,
+      continuation.maxDepth,
+      continuation.maxChars,
+      continuation.ref_id,
+      continuation.page,
+      continuation.tree_revision,
+    );
+    message.textContent = previous;
+    return result;
+  }, pages[0].continuationArgs);
+  if (snapshotContinuation.treeRevisionMismatch || snapshotContinuation.error
+      || snapshotContinuation.treeRevision !== pages[0].treeRevision) {
+    throw new Error(`${label}: live Gmail mutations invalidated the bounded page-one snapshot`);
+  }
+
+  const actionableDrift = await page.evaluate(continuation => {
+    const control = document.getElementById('real-collapse');
+    const previous = control.getAttribute('aria-label');
+    control.setAttribute('aria-label', 'Delete permanently');
+    const result = window.__generateAccessibilityTree(
+      continuation.filter,
+      continuation.maxDepth,
+      continuation.maxChars,
+      continuation.ref_id,
+      continuation.page,
+      continuation.tree_revision,
+    );
+    control.setAttribute('aria-label', previous);
+    return result;
+  }, pages[0].continuationArgs);
+  if (actionableDrift.treeRevisionMismatch !== true || !actionableDrift.error
+      || actionableDrift.pageContent) {
+    throw new Error(`${label}: a changed Gmail action reused a stale cached ref`);
+  }
+
+  const revisionMismatch = await page.evaluate(continuation => {
+    window.__wbAxTreeSnapshots.clear();
+    const message = document.querySelector('#active-thread article p');
+    const previous = message.textContent;
+    message.textContent = previous.replace('project', 'product');
+    const result = window.__generateAccessibilityTree(
+      continuation.filter,
+      continuation.maxDepth,
+      continuation.maxChars,
+      continuation.ref_id,
+      continuation.page,
+      continuation.tree_revision,
+    );
+    message.textContent = previous;
+    return result;
+  }, pages[0].continuationArgs);
+  if (revisionMismatch.treeRevisionMismatch !== true || !revisionMismatch.error || revisionMismatch.pageContent) {
+    throw new Error(`${label}: an expired Gmail snapshot did not reject a changed live continuation`);
+  }
+  const expectedRestartArgs = {
+    filter: 'all',
+    maxDepth: 15,
+    maxChars: 1200,
+    ref_id: discovery.conversationRootRefId,
+    page: 1,
+  };
+  if (JSON.stringify(revisionMismatch.continuationArgs) !== JSON.stringify(expectedRestartArgs)
+      || revisionMismatch.nextPage !== 1) {
+    throw new Error(`${label}: revision recovery did not return exact page-one restart arguments`);
+  }
+
+  const restartedPageOne = await page.evaluate(args => window.__generateAccessibilityTree(
+    args.filter,
+    args.maxDepth,
+    args.maxChars,
+    args.ref_id,
+    1,
+    'fnv1a64:0000000000000000',
+  ), expectedRestartArgs);
+  if (restartedPageOne.error || restartedPageOne.treeRevisionMismatch || !restartedPageOne.pageContent
+      || restartedPageOne.page !== 1) {
+    throw new Error(`${label}: stale revision was not ignored while establishing a fresh page-one snapshot`);
+  }
+
+  const subtreeRecovery = await page.evaluate(() => {
+    const subtree = document.createElement('section');
+    subtree.setAttribute('aria-label', 'Paginated message subtree');
+    for (let index = 1; index <= 30; index += 1) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = `Subtree message ${index}: original details and follow-up context.`;
+      subtree.append(paragraph);
+    }
+    document.getElementById('active-thread').append(subtree);
+    const refId = window.__wb_ax_ref(subtree);
+    const first = window.__generateAccessibilityTree('all', 15, 220, refId, 1);
+    subtree.querySelector('p').textContent = 'Subtree message 1: changed details and follow-up context.';
+    const continuation = first.continuationArgs || {};
+    const second = window.__generateAccessibilityTree(
+      continuation.filter,
+      continuation.maxDepth,
+      continuation.maxChars,
+      continuation.ref_id,
+      continuation.page,
+      continuation.tree_revision,
+    );
+    subtree.remove();
+    return {
+      refId,
+      firstHasMore: first.hasMore,
+      mismatch: second.treeRevisionMismatch,
+      error: second.error || '',
+      pageContent: second.pageContent,
+      nextPage: second.nextPage,
+      continuationArgs: second.continuationArgs,
+    };
+  });
+  if (subtreeRecovery.firstHasMore !== true || subtreeRecovery.mismatch !== true
+      || !subtreeRecovery.error || subtreeRecovery.pageContent) {
+    throw new Error(`${label}: a changed non-root subtree reused a stale cached page`);
+  }
+  const expectedSubtreeRestart = {
+    filter: 'all',
+    maxDepth: 15,
+    maxChars: 220,
+    ref_id: subtreeRecovery.refId,
+    page: 1,
+  };
+  if (JSON.stringify(subtreeRecovery.continuationArgs) !== JSON.stringify(expectedSubtreeRestart)
+      || subtreeRecovery.nextPage !== 1) {
+    throw new Error(`${label}: non-root recovery widened to the Gmail conversation root`);
+  }
+
+  const routeClassification = await page.evaluate(() => {
+    const classify = hash => {
+      window.history.replaceState(null, '', hash);
+      const result = window.__generateAccessibilityTree('visible', 12, 1200, null, 1);
+      return {
+        hasRoot: !!result.conversationRootRefId,
+        expansionState: result.conversationExpansionState || null,
+      };
+    };
+    const results = {
+      searchList: classify('#search/project'),
+      labelList: classify('#label/Work'),
+      categoryList: classify('#category/promotions'),
+      searchHexList: classify('#search/deadbeefcafe'),
+      labelHexList: classify('#label/deadbeefcafe'),
+      categoryHexList: classify('#category/deadbeefcafe'),
+      nestedLabelHexList: classify('#label/Projects/deadbeefcafe'),
+      searchThread: classify('#search/project/FMfc123'),
+      labelThread: classify('#label/Work/FMfc123'),
+      categoryThread: classify('#category/promotions/FMfc123'),
+      inboxLegacyThread: classify('#inbox/deadbeefcafe'),
+      searchLegacyThread: classify('#search/project/deadbeefcafe'),
+      nestedLabelThread: classify('#label/Projects/Subproject/FMfc123'),
+    };
+    window.history.replaceState(null, '', '#inbox/FMfc123');
+    return results;
+  });
+  for (const routeName of ['searchList', 'labelList', 'categoryList', 'searchHexList', 'labelHexList', 'categoryHexList', 'nestedLabelHexList']) {
+    if (routeClassification[routeName].hasRoot || routeClassification[routeName].expansionState != null) {
+      throw new Error(`${label}: Gmail ${routeName} exposed trusted conversation metadata`);
+    }
+  }
+  for (const routeName of ['searchThread', 'labelThread', 'categoryThread', 'inboxLegacyThread', 'searchLegacyThread', 'nestedLabelThread']) {
+    if (!routeClassification[routeName].hasRoot || routeClassification[routeName].expansionState !== 'expanded') {
+      throw new Error(`${label}: Gmail ${routeName} lost trusted conversation metadata`);
+    }
+  }
+
+  const spoofOnlyExpansion = await page.evaluate(() => {
+    document.getElementById('real-collapse').remove();
+    return window.__generateAccessibilityTree('visible', 12, 1200, null, 1);
+  });
+  if (spoofOnlyExpansion.conversationExpansionState != null) {
+    throw new Error(`${label}: message-body Expand all spoofed expansion evidence`);
+  }
+  const detachedRootRead = await page.evaluate(() => {
+    const current = window.__generateAccessibilityTree('visible', 12, 1200, null, 1);
+    document.getElementById('active-thread').remove();
+    return window.__generateAccessibilityTree('all', 15, 1200, current.conversationRootRefId, 1);
+  });
+  if (!/no longer connected/i.test(String(detachedRootRead.error || '')) || detachedRootRead.pageContent) {
+    throw new Error(`${label}: a detached Gmail conversation ref remained readable`);
+  }
+  return pages.map(result => ({
+    page: result.page,
+    totalChars: result.totalChars,
+    hasMore: result.hasMore,
+    truncated: result.truncated,
+    pageContent: normalizeTreeRevision(normalizeTreeRefs(result.pageContent)),
+    treeRevision: 'tree_revision',
+    conversationRootRefId: 'ref_trusted_root',
+    conversationExpansionState: result.conversationExpansionState,
+    continuationArgs: result.continuationArgs
+      ? { ...result.continuationArgs, ref_id: 'ref_trusted_root', tree_revision: 'tree_revision' }
+      : null,
+  }));
+}
+
+test('accessibility tree (Chrome): Gmail whole-thread reads use one trusted active-thread anchor', async (page) => {
+  chromeGmailThreadScopePages = await readTrustedGmailThreadPages(page, accessibilityTreeJsPath, 'chrome');
+});
+
+test('accessibility tree (Firefox): Gmail trusted thread metadata and pagination keep Chrome parity', async (page) => {
+  const firefoxPages = await readTrustedGmailThreadPages(page, firefoxAccessibilityTreeJsPath, 'firefox');
+  if (JSON.stringify(firefoxPages) !== JSON.stringify(chromeGmailThreadScopePages)) {
+    throw new Error('Chrome/Firefox trusted Gmail thread pages differ');
+  }
+});
+
+const collapsedGmailThreadFixture = `<!doctype html>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 0; font: 16px sans-serif; }
+    main { display: block; width: 900px; min-height: 600px; }
+    article { display: block; min-height: 30px; }
+    #older-message[hidden] { display: none; }
+  </style>
+  <main id="active-thread" aria-label="Collapsed project thread">
+    <h1>Collapsed project thread</h1>
+    <button id="expand-all" jsname="tRarif" aria-label="Tümünü genişlet">Tümünü genişlet</button>
+    <article class="adn" role="listitem" aria-label="Latest message">
+      <p>Latest visible project message.</p>
+      <button jsname="tRarif" aria-label="Tümünü genişlet">Untrusted message button</button>
+    </article>
+    <article id="older-message" class="adn" role="listitem" aria-label="Older message" hidden>
+      <p>Older collapsed decision that must be included.</p>
+    </article>
+  </main>
+  <script>
+    document.getElementById('expand-all').addEventListener('click', () => {
+      document.getElementById('older-message').hidden = false;
+      const control = document.getElementById('expand-all');
+      control.setAttribute('jsname', 'xvWlrc');
+      control.setAttribute('aria-label', 'Tümünü daralt');
+      control.textContent = 'Tümünü daralt';
+    });
+  </script>`;
+
+let chromeCollapsedGmailRead = null;
+
+async function readCollapsedGmailThread(page, browserKind) {
+  await setupContentGmailHtml(page, collapsedGmailThreadFixture, browserKind);
+  const discovery = await rawContentCall(page, 'get_accessibility_tree', {
+    filter: 'visible',
+    maxDepth: 12,
+    maxChars: 1200,
+    page: 1,
+  });
+  if (!discovery.conversationRootRefId || discovery.conversationExpansionState !== 'collapsed') {
+    throw new Error(`${browserKind}: collapsed Gmail thread was not discovered safely`);
+  }
+  const result = await rawContentCall(page, 'get_accessibility_tree', {
+    filter: 'all',
+    maxDepth: 15,
+    maxChars: 6000,
+    ref_id: discovery.conversationRootRefId,
+    page: 1,
+  });
+  if (result.error || result.conversationAutoExpanded !== true
+      || result.conversationExpansionState !== 'expanded') {
+    throw new Error(`${browserKind}: anchored whole-thread read did not expand Gmail: ${JSON.stringify(result)}`);
+  }
+  if (!result.pageContent.includes('Older collapsed decision that must be included.')) {
+    throw new Error(`${browserKind}: anchored whole-thread read omitted the revealed older message`);
+  }
+  const state = await page.evaluate(() => ({
+    topLevelLabel: document.getElementById('expand-all').getAttribute('aria-label'),
+    topLevelJsname: document.getElementById('expand-all').getAttribute('jsname'),
+    olderHidden: document.getElementById('older-message').hidden,
+  }));
+  if (state.topLevelLabel !== 'Tümünü daralt' || state.topLevelJsname !== 'xvWlrc' || state.olderHidden) {
+    throw new Error(`${browserKind}: whole-thread preparation did not reveal the trusted conversation: ${JSON.stringify(state)}`);
+  }
+  return {
+    pageContent: normalizeTreeRefs(result.pageContent),
+    conversationExpansionState: result.conversationExpansionState,
+    conversationAutoExpanded: result.conversationAutoExpanded,
+  };
+}
+
+test('content tree (Chrome): anchored Gmail reads reveal collapsed messages in either agent mode', async (page) => {
+  chromeCollapsedGmailRead = await readCollapsedGmailThread(page, 'chrome');
+});
+
+test('content tree (Firefox): collapsed Gmail whole-thread preparation keeps Chrome parity', async (page) => {
+  const firefoxResult = await readCollapsedGmailThread(page, 'firefox');
+  if (JSON.stringify(firefoxResult) !== JSON.stringify(chromeCollapsedGmailRead)) {
+    throw new Error('Chrome/Firefox collapsed Gmail whole-thread reads differ');
   }
 });
 
@@ -2582,6 +3033,118 @@ for (const browserKind of ['chrome', 'firefox']) {
       || String(result.targetContext.href).length > 500
     ) {
       throw new Error(`product context bounds regressed: ${JSON.stringify(result.targetContext)}`);
+    }
+  });
+
+  test(`resolve_visual_target (${browserKind}): nested SVG resolves semantic button`, async (page) => {
+    await setupContentHtml(page, `
+      <style>button { position: fixed; left: 40px; top: 30px; width: 120px; height: 60px; }</style>
+      <button id="target" aria-label="Add to cart" onclick="window.__nestedSvgClicked = true">
+        <svg id="icon" width="100%" height="100%"><circle cx="60" cy="30" r="20"></circle></svg>
+      </button>
+    `, browserKind);
+    const point = await page.locator('#icon circle').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    const result = await call(page, 'resolve_visual_target', point);
+    if (
+      !result?.success
+      || result.semanticTarget?.role !== 'button'
+      || result.semanticTarget?.name !== 'Add to cart'
+      || !/^ref_\d+$/.test(result.semanticTarget?.ref_id || '')
+      || result.semanticTarget?.eligibility !== 'semantic-button'
+      || Object.hasOwn(result.semanticTarget, 'rect')
+    ) {
+      throw new Error(`nested SVG did not resolve to button: ${JSON.stringify(result)}`);
+    }
+    const clickResult = await call(page, 'click_ax', {
+      ref_id: result.semanticTarget.ref_id,
+      expectedDocumentToken: result.documentToken,
+      expectedPageUrl: result.refScopeUrl,
+    });
+    if (!clickResult?.success || await page.evaluate(() => window.__nestedSvgClicked) !== true) {
+      throw new Error(`nested SVG semantic dispatch did not activate its button: ${JSON.stringify(clickResult)}`);
+    }
+  });
+
+  test(`resolve_visual_target (${browserKind}): plain canvas stays coordinate-only`, async (page) => {
+    await setupContentHtml(page, '<canvas id="canvas" width="200" height="100" style="position:fixed;left:20px;top:20px"></canvas>', browserKind);
+    const point = { x: 70, y: 55 };
+    const result = await call(page, 'resolve_visual_target', point);
+    if (
+      !result?.success
+      || result.semanticTarget?.eligibility !== 'coordinate-only'
+      || !/^ref_\d+$/.test(result.semanticTarget?.ref_id || '')
+      || Object.hasOwn(result.semanticTarget, 'rect')
+    ) {
+      throw new Error(`canvas should stay coordinate-only: ${JSON.stringify(result)}`);
+    }
+  });
+
+  test(`resolve_visual_target (${browserKind}): form controls and iframe boundaries stay coordinate-only`, async (page) => {
+    await setupContentHtml(page, `
+      <style>
+        #frame { position:fixed;left:20px;top:20px;width:120px;height:50px; }
+        #label { position:fixed;left:20px;top:90px;width:160px;height:30px; }
+        #text { position:fixed;left:20px;top:140px;width:160px;height:30px; }
+        #notes { position:fixed;left:20px;top:190px;width:160px;height:30px; }
+        #select { position:fixed;left:20px;top:240px;width:160px;height:30px; }
+        #file { position:fixed;left:20px;top:290px;width:160px;height:30px; }
+      </style>
+      <iframe id="frame" title="Embedded boundary"></iframe>
+      <label id="label" for="text">Account name</label>
+      <input id="text" aria-label="Account name">
+      <textarea id="notes" aria-label="Notes"></textarea>
+      <select id="select" aria-label="Plan"><option>Basic</option></select>
+      <input id="file" type="file" aria-label="Upload receipt">
+    `, browserKind);
+
+    for (const selector of ['#frame', '#label', '#text', '#notes', '#select', '#file']) {
+      const point = await page.locator(selector).evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      const result = await call(page, 'resolve_visual_target', point);
+      if (
+        !result?.success
+        || result.semanticTarget?.eligibility !== 'coordinate-only'
+        || !/^ref_\d+$/.test(result.semanticTarget?.ref_id || '')
+        || Object.hasOwn(result.semanticTarget, 'rect')
+      ) {
+        throw new Error(`${selector} should stay coordinate-only: ${JSON.stringify(result)}`);
+      }
+    }
+  });
+
+  test(`resolve_visual_target (${browserKind}): open shadow button resolves`, async (page) => {
+    await setupContentHtml(page, '<div id="host" style="position:fixed;left:25px;top:25px"></div>', browserKind);
+    await page.evaluate(() => {
+      const root = document.querySelector('#host').attachShadow({ mode: 'open' });
+      root.innerHTML = '<button id="shadow-target" aria-label="Shadow action" style="width:140px;height:50px">Action</button>';
+      root.querySelector('button').addEventListener('click', () => { window.__shadowClicked = true; });
+    });
+    const point = await page.locator('#host').evaluate((host) => {
+      const r = host.shadowRoot.querySelector('button').getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    const result = await call(page, 'resolve_visual_target', point);
+    if (
+      !result?.success
+      || result.semanticTarget?.role !== 'button'
+      || result.semanticTarget?.name !== 'Shadow action'
+      || !/^ref_\d+$/.test(result.semanticTarget?.ref_id || '')
+      || result.semanticTarget?.eligibility !== 'semantic-button'
+    ) {
+      throw new Error(`open shadow target was not resolved: ${JSON.stringify(result)}`);
+    }
+    const clickResult = await call(page, 'click_ax', {
+      ref_id: result.semanticTarget.ref_id,
+      expectedDocumentToken: result.documentToken,
+      expectedPageUrl: result.refScopeUrl,
+    });
+    if (!clickResult?.success || await page.evaluate(() => window.__shadowClicked) !== true) {
+      throw new Error(`open shadow semantic dispatch did not activate its button: ${JSON.stringify(clickResult)}`);
     }
   });
 }

@@ -1,7 +1,18 @@
 // Polski — translated from en.js. Keys mirror the English canonical file.
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Otwórz natywne okno drukowania bieżącej strony',
+  'sp.print.error': 'Nie udało się otworzyć okna drukowania: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Strumieniowanie odpowiedzi zostało przerwane; ponawiam tę turę Ask bez strumieniowania.',
   'sp.providers.no_setup_group': 'Bez konfiguracji',
@@ -59,6 +70,7 @@ export default {
   'sp.btn.language': 'Język',
   'sp.btn.settings': 'Ustawienia',
   "sp.btn.clear": "Nowa rozmowa",
+  'sp.btn.expand': 'Otwórz w nowym oknie',
   'sp.btn.send': 'Wyślij',
   'sp.chat.follow_response': 'Śledź odpowiedź',
   'sp.chat.jump_latest': 'Przejdź do najnowszego',
@@ -233,6 +245,7 @@ export default {
   'sp.perm.verb.upload': 'przesłać plik do',
   'sp.perm.verb.record': 'nagrać kartę (i mikrofon) na',
   'sp.perm.verb.schedule': 'zaplanować przyszłe działania dla',
+  'sp.perm.verb.window': 'zmienić rozmiar okna przeglądarki na',
   'sp.step.details': 'szczegóły',
   'sp.step.input_label': 'Wejście',
   'sp.step.result_label': 'Wynik',
@@ -420,6 +433,12 @@ export default {
   'st.providers.search.empty': 'Żaden dostawca nie pasuje do tego wyszukiwania i filtra.',
   'st.providers.save': 'Zapisz',
   'st.providers.test': 'Testuj połączenie',
+  'st.providers.duplicate': 'Duplikuj',
+  'st.providers.duplicate_limit': 'Dozwolony jest tylko jeden duplikat',
+  'st.providers.duplicate_unavailable': 'Tego dostawcy nie można zduplikować',
+  'st.providers.duplicate_inactive': 'Zapisz tego dostawcę przed jego zduplikowaniem',
+  'st.providers.remove_duplicate': 'Usuń duplikat',
+  'st.providers.remove_duplicate_confirm': 'Usunąć tego zduplikowanego dostawcę i jego zapisaną konfigurację?',
   'st.providers.set_active': 'Ustaw jako aktywny',
   'st.providers.active': 'AKTYWNY',
   'st.providers.saved': 'Zapisano!',
@@ -653,6 +672,10 @@ export default {
   'st.display.search.placeholder': 'Szukaj w ustawieniach ogólnych',
   'st.display.search.empty': 'Brak pasujących ustawień ogólnych.',
   'st.display.advanced': 'Zaawansowane',
+  ...getApocalypseModeCopy('pl'),
+  ...getEmergencyBoxCopy('pl'),
+  'st.providers.webgpu_download.stopping': 'Zatrzymywanie i usuwanie plików…',
+  'st.providers.webgpu_download.stop': 'Zatrzymaj i usuń',
   'st.display.clarify_timeout.label': 'Limit czasu dopytania',
   'st.display.clarify_timeout.desc': 'Jak długo czekać na odpowiedź na dopytanie, zanim automatycznie wybrana zostanie pierwsza opcja (lub upłynie limit, gdy brak opcji). 0 = Natychmiast (zawsze auto-wybór). Powyżej 1200s czekaj bez limitu (Wył.). Domyślnie 60s. Nie dotyczy uprawnień ani potwierdzeń wysyłki formularza.',
   'st.display.clarify_timeout.off': 'Wył.',
@@ -774,6 +797,7 @@ export default {
   "sp.slash.teach": "Nagraj działania jako zapisany przepływ pracy",
   "sp.slash.run_workflow": "Uruchom zapisany przepływ pracy według ID",
   "sp.workflows.run_prompt": "Uruchom zapisany przepływ pracy „{name}”",
+  "sp.workflows.standalone_unavailable": "To samodzielne okno działa tylko w trybie Pytaj. Otwórz WebBrain w panelu bocznym, aby uruchamiać zapisane przepływy pracy w trybie Działaj.",
   "sp.workflows.parameters_for": "Wprowadź parametry dla „{name}”. Wartości zostaną użyte tylko w tym uruchomieniu.",
   "sp.workflows.parameter_required": "Pole „{name}” jest wymagane.",
   "sp.slash.save_workflow": "Zapisz ostatnie udane zarejestrowane wykonanie",
@@ -956,4 +980,5 @@ export default {
   "st.sync.confirm.reset": "Zastąpić zaszyfrowaną kopię w chmurze bieżącą konfiguracją WebBrain tego urządzenia?",
   "st.sync.consent.legacy": "Włączyć szyfrowaną synchronizację? WebBrain prześle kompleksowo zaszyfrowaną kopię Twoich wspomnień, autouzupełniania profilu i ustawień dostawcy klucza API do chmury WebBrain. Historia czatów i logowania OAuth nie są synchronizowane.",
   "st.sync.consent.denied": "Nie przyznano zezwolenia na szyfrowaną synchronizację.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

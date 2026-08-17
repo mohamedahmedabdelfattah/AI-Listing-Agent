@@ -1,7 +1,18 @@
 // Russian (ru).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Открыть системное диалоговое окно печати текущей страницы',
+  'sp.print.error': 'Не удалось открыть диалоговое окно печати: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Поток ответа был прерван; этот запрос Ask повторяется без потоковой передачи.',
   'sp.providers.no_setup_group': 'Без настройки',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': 'Язык',
   'sp.btn.settings': 'Настройки',
   "sp.btn.clear": "Новый диалог",
+  'sp.btn.expand': 'Открыть в новом окне',
   'sp.btn.send': 'Отправить',
   'sp.chat.follow_response': 'Следить за ответом',
   'sp.chat.jump_latest': 'К последнему сообщению',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': 'Бесплатное ежедневное использование WebBrain Cloud включено. Запросы проходят через api.webbrain.one; по умолчанию мы записываем метаданные для квоты и отладки, а не текст запросов, содержимое страниц, скриншоты или ответы модели. {privacyLink}. Для большего объёма оформите подписку на {subscribeLink}. Управляйте оплатой на {accountLink}.',
   'st.providers.webbrain_note.privacy_link': 'Политика конфиденциальности',
   'st.providers.test': 'Проверить соединение',
+  'st.providers.duplicate': 'Дублировать',
+  'st.providers.duplicate_limit': 'Разрешён только один дубликат',
+  'st.providers.duplicate_unavailable': 'Этого провайдера нельзя дублировать',
+  'st.providers.duplicate_inactive': 'Сохраните этого провайдера перед дублированием',
+  'st.providers.remove_duplicate': 'Удалить дубликат',
+  'st.providers.remove_duplicate_confirm': 'Удалить этого дублированного провайдера и его сохранённые настройки?',
   'st.providers.set_active': 'Сделать активным',
   'st.providers.active': 'АКТИВЕН',
   'st.providers.saved': 'Сохранено!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': 'Блокнот очищен.',
   'sp.scratchpad.error': 'Блокнот недоступен: {msg}',
   'sp.perm.verb.schedule': 'запланировать будущие действия для',
+  'sp.perm.verb.window': 'изменить размер окна браузера на',
   'tool.schedule_resume': 'Планирование возобновления',
   'tool.schedule_task': 'Планирование задачи',
   'st.display.scheduled_tasks.label': 'Запланированные задачи',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': 'Поиск в общих настройках',
   'st.display.search.empty': 'Нет совпадений в общих настройках.',
   'st.display.advanced': 'Расширенные',
+  ...getApocalypseModeCopy('ru'),
+  ...getEmergencyBoxCopy('ru'),
+  'st.providers.webgpu_download.stopping': 'Остановка и удаление файлов…',
+  'st.providers.webgpu_download.stop': 'Остановить и удалить',
   'st.display.clarify_timeout.label': 'Таймаут уточнения',
   'st.display.clarify_timeout.desc': 'Сколько ждать ответа на уточняющий вопрос, прежде чем автоматически выбрать первый вариант (или зафиксировать таймаут без вариантов). 0 — сразу (всегда автовыбор). Больше 1200 с — ждать бесконечно (Выкл.). По умолчанию 60 с. Не применяется к разрешениям и подтверждениям отправки форм.',
   'st.display.clarify_timeout.off': 'Выкл.',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "Записать ваши действия как сохранённый рабочий процесс",
   "sp.slash.run_workflow": "Запустить сохранённый сценарий по ID",
   "sp.workflows.run_prompt": "Запустить сохранённый сценарий «{name}»",
+  "sp.workflows.standalone_unavailable": "Это отдельное окно работает только в режиме «Спросить». Откройте WebBrain на боковой панели, чтобы запускать сохранённые сценарии в режиме «Действовать».",
   "sp.workflows.parameters_for": "Введите параметры для «{name}». Значения используются только в этом запуске.",
   "sp.workflows.parameter_required": "Поле «{name}» обязательно.",
   "sp.slash.save_workflow": "Сохранить последний успешный записанный запуск",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "Заменить зашифрованную облачную копию текущей настройкой WebBrain этого устройства?",
   "st.sync.consent.legacy": "Включить шифрованную синхронизацию? WebBrain передаст сквозную зашифрованную копию ваших воспоминаний, автозаполнение профиля и настройки поставщика ключей API в WebBrain Cloud. История чата и входы по OAuth не синхронизируются.",
   "st.sync.consent.denied": "Разрешение на зашифрованную синхронизацию не предоставлено.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

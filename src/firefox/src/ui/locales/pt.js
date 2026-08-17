@@ -1,5 +1,16 @@
 // Portuguese — translated from the canonical English locale.
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Abrir a caixa de diálogo de impressão nativa da página atual',
+  'sp.print.error': 'Não foi possível abrir a caixa de diálogo de impressão: {msg}',
   'sp.streaming.fallback': 'A transmissão da resposta foi interrompida; tentando novamente esta interação Ask sem transmissão.',
   'sp.providers.no_setup_group': "Nenhuma configuração necessária",
   'sp.providers.no_setup': "Sem configuração",
@@ -62,6 +73,7 @@ export default {
   'sp.btn.history': "Histórico de bate-papo",
   'sp.btn.settings': "Configurações",
   "sp.btn.clear": "Nova conversa",
+  'sp.btn.expand': 'Abrir em uma nova janela',
   'sp.btn.send': "Enviar",
   'sp.chat.follow_response': 'Acompanhar resposta',
   'sp.chat.jump_latest': 'Ir para o mais recente',
@@ -133,6 +145,7 @@ export default {
   "sp.slash.teach": "Grave suas ações como um fluxo de trabalho salvo",
   'sp.slash.run_workflow': "Execute um fluxo de trabalho salvo por ID",
   'sp.workflows.run_prompt': "Execute o fluxo de trabalho salvo “{name}”",
+  "sp.workflows.standalone_unavailable": "Esta janela independente funciona apenas no modo Perguntar. Abra o WebBrain no painel lateral para executar fluxos de trabalho salvos no modo Agir.",
   'sp.workflows.parameters_for': "Insira os parâmetros para “{name}”. Os valores são usados ​​apenas para esta execução.",
   'sp.workflows.parameter_required': "“{name}” é necessário.",
   'sp.slash.save_workflow': "Salve a última execução registrada com sucesso",
@@ -323,6 +336,7 @@ export default {
   'sp.perm.verb.upload': "carregar um arquivo para",
   'sp.perm.verb.record': "grave a guia (e o microfone) em",
   'sp.perm.verb.schedule': "agendar trabalhos futuros para",
+  'sp.perm.verb.window': 'redimensionar a janela do navegador em',
 
   'sp.step.details': "detalhes",
   'sp.step.input_label': "Entrada",
@@ -516,6 +530,10 @@ export default {
   'st.display.search.placeholder': "Pesquisar configurações gerais",
   'st.display.search.empty': "Nenhuma configuração geral corresponde.",
   'st.display.advanced': "Avançado",
+  ...getApocalypseModeCopy('pt'),
+  ...getEmergencyBoxCopy('pt'),
+  'st.providers.webgpu_download.stopping': 'Interrompendo e removendo arquivos…',
+  'st.providers.webgpu_download.stop': 'Interromper e remover',
   'st.display.help_improve.label': "Ajude a melhorar WebBrain",
   'st.display.help_improve.desc_html': "Permitir que textos qualificados da nuvem WebBrain e interações de ferramentas sejam retidos e usados para avaliação, melhoria, ajuste fino e treinamento. Ativado por padrão. Desativar isso permanentemente desativa a conversa atual; ativá-lo novamente se aplica à próxima nova conversa. Capturas de tela e bytes de imagem não são retidos no banco de dados de melhorias WebBrain. <u>Solicitações de API de modelo local e de criação própria nunca são coletadas por WebBrain.</u> <a href=\"https://webbrain.one/privacy\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"color:var(--accent);\">Política de privacidade →</a>",
   'st.display.clarify_timeout.label': "Esclarecer o tempo limite",
@@ -598,6 +616,12 @@ export default {
   'st.providers.search.empty': "Nenhum provedor corresponde a esta pesquisa e filtro.",
   'st.providers.save': "Salvar",
   'st.providers.test': "Conexão de teste",
+  'st.providers.duplicate': 'Duplicar',
+  'st.providers.duplicate_limit': 'Só é permitida uma duplicata',
+  'st.providers.duplicate_unavailable': 'Este provedor não pode ser duplicado',
+  'st.providers.duplicate_inactive': 'Salve este provedor antes de duplicá-lo',
+  'st.providers.remove_duplicate': 'Remover duplicata',
+  'st.providers.remove_duplicate_confirm': 'Remover este provedor duplicado e a configuração salva?',
   'st.providers.set_active': "Definir ativo",
   'st.providers.active': "ATIVO",
   'st.providers.saved': "Salvo!",
@@ -1016,4 +1040,5 @@ export default {
   "st.sync.confirm.reset": "Substituir a cópia criptografada na nuvem pela configuração atual do WebBrain deste dispositivo?",
   "st.sync.consent.legacy": "Ativar a sincronização criptografada? O WebBrain transmitirá uma cópia criptografada de ponta a ponta de suas memórias, preenchimento automático de perfil e configurações do provedor de chave API para o WebBrain Cloud. O histórico de bate-papo e os logins do OAuth não são sincronizados.",
   "st.sync.consent.denied": "A permissão de sincronização criptografada não foi concedida.",
+  'st.providers.webgpu_note.body': '{modelLink} é executado inteiramente no Chrome, sem endpoint de API. A primeira geração baixa cerca de 4,85 GB e armazena o modelo no cache do navegador. Testar conexão verifica o runtime incluído e o adaptador de hardware sem baixar o modelo.',
 };

@@ -1,7 +1,18 @@
 // Dutch (nl).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Het systeemeigen afdrukvenster van de huidige pagina openen',
+  'sp.print.error': 'Het afdrukvenster kon niet worden geopend: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'De antwoordstream is onderbroken; deze Ask-beurt wordt opnieuw geprobeerd zonder streaming.',
   'sp.providers.no_setup_group': 'Geen configuratie nodig',
@@ -62,6 +73,7 @@ export default {
   'sp.btn.history': 'Chatgeschiedenis',
   'sp.btn.settings': 'Instellingen',
   "sp.btn.clear": "Nieuw gesprek",
+  'sp.btn.expand': 'Openen in een nieuw venster',
   'sp.btn.send': 'Verzenden',
   'sp.chat.follow_response': 'Volg reactie',
   'sp.chat.jump_latest': 'Ga naar laatste',
@@ -129,6 +141,7 @@ export default {
   "sp.slash.teach": "Acties opnemen als opgeslagen workflow",
   'sp.slash.run_workflow': 'Voer een opgeslagen workflow uit op ID',
   'sp.workflows.run_prompt': 'Opgeslagen workflow "{name}" uitvoeren',
+  "sp.workflows.standalone_unavailable": "Dit zelfstandige venster is alleen voor de Vraagmodus. Open WebBrain in het zijpaneel om opgeslagen workflows in de Actiemodus uit te voeren.",
   'sp.workflows.parameters_for': 'Voer parameters in voor "{name}". Waarden worden alleen voor deze uitvoering gebruikt.',
   'sp.workflows.parameter_required': '"{name}" is verplicht.',
   'sp.slash.save_workflow': 'Sla de laatste succesvolle opgenomen uitvoering op',
@@ -311,6 +324,7 @@ export default {
   'sp.perm.verb.upload': 'een bestand uploaden naar',
   'sp.perm.verb.record': 'het tabblad (en microfoon) opnemen op',
   'sp.perm.verb.schedule': 'geplande taken instellen voor',
+  'sp.perm.verb.window': 'het browservenster aanpassen op',
   'sp.step.details': 'details',
   'sp.step.input_label': 'Invoer',
   'sp.step.result_label': 'Resultaat',
@@ -493,6 +507,10 @@ export default {
   'st.display.search.placeholder': 'Zoek in Algemene instellingen',
   'st.display.search.empty': 'Geen algemene instellingen gevonden.',
   'st.display.advanced': 'Geavanceerd',
+  ...getApocalypseModeCopy('nl'),
+  ...getEmergencyBoxCopy('nl'),
+  'st.providers.webgpu_download.stopping': 'Stoppen en bestanden verwijderen…',
+  'st.providers.webgpu_download.stop': 'Stoppen en verwijderen',
   'st.display.help_improve.label': 'Help WebBrain verbeteren',
   'st.display.help_improve.desc_html': 'Sta toe dat geschikte WebBrain Cloud-tekst- en toolinteracties worden bewaard en gebruikt voor evaluatie, verbetering, fine-tuning en training. Standaard ingeschakeld. Als u dit uitschakelt, wordt het huidige gesprek permanent uitgesloten; opnieuw inschakelen geldt vanaf het volgende nieuwe gesprek. Screenshots en afbeeldingsbytes worden niet bewaard in de WebBrain-verbeteringsdatabase. <u>Verzoeken aan lokale modellen en verzoeken met uw eigen API worden nooit door WebBrain verzameld.</u> <a href="https://webbrain.one/privacy" target="_blank" rel="noopener noreferrer" style="color:var(--accent);">Privacybeleid →</a>',
   'st.display.clarify_timeout.label': 'Verduidelijkingstime-out',
@@ -574,6 +592,12 @@ export default {
   'st.providers.search.empty': 'Geen providers komen overeen met deze zoekopdracht en filter.',
   'st.providers.save': 'Opslaan',
   'st.providers.test': 'Verbinding testen',
+  'st.providers.duplicate': 'Dupliceren',
+  'st.providers.duplicate_limit': 'Er is slechts één duplicaat toegestaan',
+  'st.providers.duplicate_unavailable': 'Deze provider kan niet worden gedupliceerd',
+  'st.providers.duplicate_inactive': 'Sla deze provider op voordat u deze dupliceert',
+  'st.providers.remove_duplicate': 'Duplicaat verwijderen',
+  'st.providers.remove_duplicate_confirm': 'Deze gedupliceerde provider en de opgeslagen configuratie verwijderen?',
   'st.providers.set_active': 'Actief instellen',
   'st.providers.active': 'ACTIEF',
   'st.providers.saved': 'Opgeslagen!',
@@ -969,4 +993,5 @@ export default {
   "st.sync.confirm.reset": "De gecodeerde cloudkopie vervangen door de huidige WebBrain-installatie van dit apparaat?",
   "st.sync.consent.legacy": "Versleutelde synchronisatie inschakelen? WebBrain verzendt een end-to-end gecodeerde kopie van uw herinneringen, automatisch aanvullen van profielen en API-sleutelproviderinstellingen naar WebBrain Cloud. Chatgeschiedenis en OAuth-aanmeldingen worden niet gesynchroniseerd.",
   "st.sync.consent.denied": "Er is geen versleutelde synchronisatietoestemming verleend.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

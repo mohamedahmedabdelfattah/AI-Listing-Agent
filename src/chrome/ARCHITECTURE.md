@@ -1,6 +1,6 @@
 # WebBrain Chrome/Edge Extension — Architecture
 
-> Version 29.0.2 · Manifest V3 · Service Worker background
+> Version 32.1.0 · Manifest V3 · Service Worker background
 
 ## High-Level Overview
 
@@ -59,7 +59,9 @@ src/chrome/
 │   │   └── network-tools.js    # fetch_url, research_url, downloads, skill HTTP tools
 │   ├── offscreen/
 │   │   ├── offscreen.html      # Offscreen document host
-│   │   └── offscreen.js        # HTTP fetch proxy (localhost/PNA fallback)
+│   │   ├── offscreen.js        # HTTP fetch proxy (localhost/PNA fallback)
+│   │   ├── vision-inference-host.js # Local WebGPU worker bridge
+│   │   └── inference-worker.js # Transformers.js WebGPU inference worker
 │   ├── providers/
 │   │   ├── base.js             # Provider interface
 │   │   ├── manager.js          # Provider lifecycle
@@ -68,6 +70,7 @@ src/chrome/
 │   │   ├── aws-bedrock.js      # AWS Bedrock Converse
 │   │   ├── anthropic.js        # Anthropic Claude
 │   │   ├── llamacpp.js         # Local llama.cpp server
+│   │   ├── webgpu.js           # Chrome-only endpoint-free text + vision providers
 │   │   └── fetch-with-fallback.js  # Uses offscreen proxy on direct-fetch failure
 │   ├── trace/
 │   │   └── recorder.js         # Optional IndexedDB run recorder
@@ -103,7 +106,7 @@ src/chrome/
 | `webRequest` | Opt-in, in-memory same-tab XHR/fetch observer for repeated-click API shortcut hints and opaque same-origin replay. Off by default. |
 | `alarms` | Scheduled tasks and scheduled resumes across browser sessions. |
 | `unlimitedStorage` | Optional trace recorder persists agent runs (LLM I/O + screenshots) into IndexedDB. A multi-step run can be 1–10 MB; the default ~10 MB origin cap fills after a few runs. |
-| `offscreen` | Localhost LLM servers (llama.cpp, LM Studio, Ollama) are unreachable from the MV3 service worker due to CORS / Private Network Access restrictions. An offscreen document hosts the fetch proxy AND the tab recorder. |
+| `offscreen` | Hosts the localhost/PNA fetch proxy, tab recorder, and optional on-device WebGPU model worker. Chrome MV3 service workers cannot provide those document APIs directly. |
 | `privateNetworkAccess` | Same motivation — allow calling `http://localhost:8080` from the extension. |
 | `tabCapture` | Optional "Record this tab" feature in the sidepanel. Pulls a MediaStream of the active tab's video+audio via `chrome.tabCapture.getMediaStreamId()`, hands it to the offscreen document which runs the MediaRecorder. |
 
@@ -114,7 +117,8 @@ src/chrome/
 Manual action-mode runs (Act or Dev) always call `agent/planner.js` before the
 first tool loop. Off uses the compact structured intent schema; Try and Strict
 use the full bounded JSON plan with steps, memory strategy, scheduling hints,
-and risks. The side panel renders a full plan
+risks, and a language-neutral structured messaging target when the trusted
+request authorizes an external message. The side panel renders a full plan
 as an editable approval card; approving it pins the plan to the scratchpad so it
 survives context compaction. Rejecting, timing out, or pressing Stop cancels
 before browser tools execute. In the default Try mode, invalid JSON after one
@@ -160,6 +164,13 @@ Download-job tools still run in action modes and use the normal Downloads
 permission gate before saving files. Third-party results should use
 `resultPolicy: "untrusted"` so the agent wraps and digests them like page
 content instead of trusted instructions.
+
+The exact packaged Wikipedia skill uses `agent/wikipedia-offline.js` to fall
+back to user-installed Kiwix/ZIM archives after a live request fails.
+`agent/apocalypse-mode.js` owns the opt-in archive manager, resumable verified
+downloads, durable IndexedDB state, OPFS or user-selected file bytes, and local openZIM title lookup.
+No archive is downloaded by enabling the skill. Local passages retain their
+canonical URL, language, archive date, and license metadata and stay untrusted.
 
 ---
 
@@ -251,11 +262,13 @@ that would feed back).
 Chrome/Edge MV3 allows exactly one offscreen document per extension. The
 localhost-fetch proxy already needs one for Private Network Access
 workarounds. Rather than fight over it, `offscreen/offscreen.html` loads
-both `offscreen.js` (fetch proxy) and `recorder.js` (tab recorder).
+`offscreen.js` (fetch proxy), `recorder.js` (tab recorder), and
+`vision-inference-host.js` (local WebGPU model worker bridge).
 `src/offscreen/ensure.js` is the single creation helper, declaring all
-reasons up front: `LOCAL_STORAGE` (fetch), `DISPLAY_MEDIA` (tab/display
-capture), `USER_MEDIA` (mic). Each script binds its own `runtime.onMessage` filter
-(`offscreen-fetch` vs `recorder-*`) so they don't collide.
+  reasons up front: `LOCAL_STORAGE` (fetch), `WORKERS` (WebGPU inference),
+  `BLOBS` (download staging), `DISPLAY_MEDIA` (tab/display capture),
+  `USER_MEDIA` (mic), and `AUDIO_PLAYBACK` (watch alerts). Each script binds its own `runtime.onMessage` filter
+(`offscreen-fetch`, `recorder-*`, or `webgpu-*`) so they don't collide.
 
 ### Transcription provider selection
 
@@ -538,9 +551,11 @@ class BaseProvider {
 | `AnthropicProvider` | `/v1/messages` | `claude-(3\|sonnet-4\|opus-4)` patterns |
 | `LlamaCppProvider` | `localhost:8080/v1/chat/completions` | Enabled by default, configurable |
 | OpenAI-compatible configs | Provider-specific `/v1` endpoint | Model-name regex or explicit config |
+| `WebGPUProvider` | Chrome offscreen worker; no endpoint | Text-only selectable Hugging Face ONNX model |
+| `WebGPUVisionProvider` | Chrome offscreen worker; no endpoint | Always; dedicated screenshot-description sidecar only |
 
-`ProviderManager` seeds WebBrain Cloud, seven local backends, Azure OpenAI, AWS
-Bedrock, direct cloud providers, and router providers. The canonical current ID
+`ProviderManager` seeds WebBrain Cloud, one Chromium in-browser WebGPU provider,
+nine local endpoints, Azure OpenAI, AWS Bedrock, direct cloud providers, and router providers. The canonical current ID
 and default-model table is maintained in
 [`docs/providers-and-models.md`](../../docs/providers-and-models.md).
 
@@ -550,7 +565,11 @@ OpenAI format → Anthropic blocks: system → separate `system` field; `assista
 
 ### fetch-with-fallback
 
-`providers/fetch-with-fallback.js` tries a direct `fetch` first. On failure (typically a `TypeError: Failed to fetch` against localhost), it lazily creates an offscreen document and proxies through it. This is the only reason the `offscreen` permission exists.
+`providers/fetch-with-fallback.js` tries a direct `fetch` first. On failure
+(typically a `TypeError: Failed to fetch` against localhost), it lazily creates
+an offscreen document and proxies through it. The shared offscreen host also
+supports recording, validated download staging, audio, the cloud bridge, and
+the optional local WebGPU model worker.
 
 ---
 
@@ -738,6 +757,8 @@ advertise mutation availability and route still-missing required inputs through
 | Finance | Stripe, Coinbase, Robinhood, TradingView, `finance-generic` (banks/exchanges/payments) |
 
 Finance adapters carry a `[FINANCE / HIGH-STAKES]` banner and extra confirmation guidance. The `finance-generic` adapter matches a curated regex of bank, brokerage, crypto exchange, and payment domains as a catch-all when no site-specific adapter exists.
+
+Adapters may also opt into narrow runtime enforcement. On Douyin `/chat`, an `active_conversation` planner target must first be pinned to exactly one strong visible header identity before any page tool runs. Send-like actions then run a read-only content probe immediately before dispatch. Only one unique exact normalized identity from the narrow, non-scrollable header above a lower-page layout composer can match the pinned or explicitly named recipient; unresolved controls/composers, ambiguous evidence, and mismatches return a no-dispatch blocker. Enter in another editable such as recipient search is non-message, and a structurally verified conversation row in the separate left rail remains selectable even when a short list does not overflow, but distant controls and nested row actions remain inconclusive. Protected composer Enter dispatch is limited to one keypress per verification. Send-capable clicks, accessibility clicks, submitted fields, and Enter presses carry a one-use binding to the action target, composer, URL, and identity set; direct content paths and trusted CDP mouse/key paths consume and revalidate it immediately before the consequential click or key event. Protected accessibility clicks never issue a second no-progress fallback click. Search text, message content, and form values never count as recipient evidence. Dispatch-capable tools that cannot bind effects to the probed recipient are blocked on the protected route, including `upload_file` because a page change handler may auto-send the attachment. Saved workflows cannot inherit a planner recipient target, so any potentially dispatching step scoped to a protected messaging route stops before deterministic replay and must be run as a normal Act task with a freshly named recipient.
 
 ---
 

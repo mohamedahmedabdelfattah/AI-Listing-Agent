@@ -5,7 +5,7 @@ import { t } from './i18n.js';
 const SOCIAL_HOST_RE = /(^|\.)(instagram\.com|tiktok\.com|x\.com|twitter\.com|facebook\.com|fb\.com|threads\.net|youtube\.com|youtu\.be|reddit\.com|pinterest\.com|snapchat\.com)$/i;
 const PUBLIC_MEDIA_HOST_RE = /(^|\.)(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|x\.com|twitter\.com|reddit\.com|redd\.it|facebook\.com|fb\.com|fb\.watch|pinterest\.com|pin\.it|linkedin\.com|threads\.net)$/i;
 const DATING_HOST_RE = /(^|\.)(tinder\.com|bumble\.com|hinge\.co|okcupid\.com|match\.com|pof\.com|badoo\.com|happn\.com|coffeemeetsbagel\.com)$/i;
-const SHOPPING_HOST_RE = /(^|\.)(amazon\.[a-z.]+|ebay\.[a-z.]+|etsy\.com|walmart\.com|target\.com|bestbuy\.com|shopify\.com|aliexpress\.com|mercadolibre\.[a-z.]+|mercadolivre\.com\.br|hepsiburada\.com|trendyol\.com|n11\.com|shopee\.[a-z.]+|shopeekh\.com|lazada\.[a-z.]+)$/i;
+const SHOPPING_HOST_RE = /(^|\.)(amazon\.(?:(?:com|co)\.)?[a-z]{2,}|ebay\.(?:(?:com|co)\.)?[a-z]{2,}|etsy\.com|walmart\.com|target\.com|bestbuy\.com|shopify\.com|aliexpress\.com|mercadolibre\.(?:(?:com|co)\.)?[a-z]{2,}|mercadolivre\.com\.br|hepsiburada\.com|trendyol\.com|n11\.com|shopee\.(?:(?:com|co)\.)?[a-z]{2,}|shopeekh\.com|lazada\.(?:(?:com|co)\.)?[a-z]{2,})$/i;
 const PRODUCT_PATH_RE = /\/(dp|gp\/product|itm|p|product|products|prod|item|listing|ilan|urun)\b/i;
 const COUPON_PRODUCT_PATH_RE = /\/(?:dp|gp\/product|itm|p|product|products|prod|item|listing|ilan|urun|ip|detail)(?:\/|$)/i;
 const COUPON_BESTBUY_PRODUCT_PATH_RE = /\/site\/[^/]+\/\d+\.p(?:\/|$)/i;
@@ -18,7 +18,8 @@ const RELEASES_PATH_RE = /^\/[^/]+\/[^/]+\/releases(?:\/|$)/i;
 const SEARCH_INPUT_RE = /^(search|q|query|keyword|keywords|s)$/i;
 const EMAIL_HOST_RE = /(^|\.)(mail\.google\.com|gmail\.com|outlook\.live\.com|outlook\.office\.com|outlook\.office365\.com|mail\.yahoo\.com|icloud\.com|proton\.me|protonmail\.com|fastmail\.com|hey\.com|mail\.zoho\.com)$/i;
 const DM_HOST_RE = /(^|\.)(instagram\.com|x\.com|twitter\.com|facebook\.com|messenger\.com|threads\.net|reddit\.com|linkedin\.com|discord\.com|slack\.com|web\.whatsapp\.com|messages\.google\.com|web\.telegram\.org)$/i;
-const DM_PATH_RE = /(?:^|[/?#])(direct|messages?|messaging|inbox|chat|chats|dm|conversation|conversations|t|channels)(?:\b|[/?#])/i;
+const DM_PATH_RE = /(?:^|[/?#])(direct|messages?|messaging|inbox|chat|chats|dm|conversation|conversations|channels)(?:\b|[/?#])/i;
+const MESSENGER_THREAD_PATH_RE = /^\/t(?:\/|$)/i;
 const COMPOSE_FIELD_RE = /\b(compose|reply|message|comment|post|tweet|share|caption|body|editor|write|what'?s happening|start a post|add a comment|write a reply|email)\b/i;
 const X_PROFILE_RESERVED_PATH_RE = /^\/(home|explore|notifications|messages?|i|search|settings|compose|login|signup|jobs|communities|lists|hashtag|intent|share|privacy|tos)(?:\/|$)/i;
 const WP_ADMIN_RE = /\/wp-admin(?:\/|$)/i;
@@ -281,7 +282,8 @@ function isCommunicationThread(pageInfo = {}, host = '', path = '/') {
     return hasEmailThreadSignal(pageInfo);
   }
   if (DM_HOST_RE.test(host)) {
-    return DM_PATH_RE.test(route) || /\b(reply|respond|conversation|thread|direct message|dm|chat)\b/i.test(signal);
+    const isMessengerThread = (host === 'messenger.com' || host.endsWith('.messenger.com')) && MESSENGER_THREAD_PATH_RE.test(path);
+    return isMessengerThread || DM_PATH_RE.test(route) || /\b(reply|respond|conversation|thread|direct message|dm|chat)\b/i.test(signal);
   }
   return false;
 }
@@ -384,25 +386,25 @@ export function buildRecommendedActions(pageInfo = {}, options = {}) {
     addUnique(actions, {
       id: 'summarize-thread',
       label: 'Summarize this thread',
-      prompt: 'Use get_accessibility_tree with filter:"all" and follow every returned continuationArgs until hasMore:false to read the complete email or message thread. Summarize key points, decisions, and unanswered questions.',
+      prompt: 'Read the complete active email or message thread with get_accessibility_tree. In Gmail, use the first result\'s trusted conversationRootRefId as ref_id with filter:"all" and maxDepth:15 instead of paginating the document root. Follow every exact returned continuationArgs until hasMore:false, then summarize key points, decisions, and unanswered questions.',
       runOptions: firstToolRunOptions(
         'summarize-thread',
         'get_accessibility_tree',
         completeTreeArgs(15),
         'Read the complete conversation thread before summarizing it.',
-        ['Call get_accessibility_tree with filter:"all" and maxDepth:15.', 'Follow every continuationArgs until hasMore:false.', 'Summarize the complete thread from the returned page data.'],
+        ['Discover the active thread, then anchor Gmail reads to its trusted conversationRootRefId.', 'Follow every exact continuationArgs until hasMore:false.', 'Summarize the complete thread from the returned thread data.'],
       ),
     });
     addUnique(actions, {
       id: 'find-followups',
       label: 'Find follow-ups',
-      prompt: 'Use get_accessibility_tree with filter:"all" and follow every returned continuationArgs until hasMore:false to read the complete conversation. Extract action items, deadlines, people to follow up with, and open questions.',
+      prompt: 'Read the complete active conversation with get_accessibility_tree. In Gmail, use the first result\'s trusted conversationRootRefId as ref_id with filter:"all" and maxDepth:15 instead of paginating the document root. Follow every exact returned continuationArgs until hasMore:false, then extract action items, deadlines, people to follow up with, and open questions.',
       runOptions: firstToolRunOptions(
         'find-followups',
         'get_accessibility_tree',
         completeTreeArgs(15),
         'Read the complete conversation thread before extracting follow-ups.',
-        ['Call get_accessibility_tree with filter:"all" and maxDepth:15.', 'Follow every continuationArgs until hasMore:false.', 'Extract follow-ups from the complete thread data.'],
+        ['Discover the active thread, then anchor Gmail reads to its trusted conversationRootRefId.', 'Follow every exact continuationArgs until hasMore:false.', 'Extract follow-ups from the complete thread data.'],
       ),
     });
   }

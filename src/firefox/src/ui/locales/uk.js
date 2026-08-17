@@ -1,7 +1,18 @@
 // Ukrainian (uk).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Відкрити системне діалогове вікно друку поточної сторінки',
+  'sp.print.error': 'Не вдалося відкрити діалогове вікно друку: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Потік відповіді перервано; цей запит Ask повторюється без потокової передачі.',
   'sp.providers.no_setup_group': 'Без налаштування',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': 'Мова',
   'sp.btn.settings': 'Налаштування',
   "sp.btn.clear": "Новий діалог",
+  'sp.btn.expand': 'Відкрити в новому вікні',
   'sp.btn.send': 'Надіслати',
   'sp.chat.follow_response': 'Стежити за відповіддю',
   'sp.chat.jump_latest': 'До останнього повідомлення',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': 'Безкоштовне щоденне використання WebBrain Cloud включено. Запити проходять через api.webbrain.one; за замовчуванням ми записуємо метадані для квоти та налагодження, а не текст запитів, вміст сторінок, знімки екрана чи відповіді моделі. {privacyLink}. Для більшого обсягу оформіть підписку на {subscribeLink}. Керуйте оплатою на {accountLink}.',
   'st.providers.webbrain_note.privacy_link': 'Політика конфіденційності',
   'st.providers.test': 'Перевірити з\'єднання',
+  'st.providers.duplicate': 'Дублювати',
+  'st.providers.duplicate_limit': 'Дозволено лише один дублікат',
+  'st.providers.duplicate_unavailable': 'Цього постачальника не можна дублювати',
+  'st.providers.duplicate_inactive': 'Збережіть цього постачальника перед дублюванням',
+  'st.providers.remove_duplicate': 'Видалити дублікат',
+  'st.providers.remove_duplicate_confirm': 'Видалити цього дубльованого постачальника та його збережені налаштування?',
   'st.providers.set_active': 'Зробити активним',
   'st.providers.active': 'АКТИВНИЙ',
   'st.providers.saved': 'Збережено!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': 'Чернетник очищено.',
   'sp.scratchpad.error': 'Чернетник недоступний: {msg}',
   'sp.perm.verb.schedule': 'запланувати майбутню роботу для',
+  'sp.perm.verb.window': 'змінити розмір вікна браузера на',
   'tool.schedule_resume': 'Планування відновлення',
   'tool.schedule_task': 'Планування завдання',
   'st.display.scheduled_tasks.label': 'Заплановані завдання',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': 'Пошук у загальних налаштуваннях',
   'st.display.search.empty': 'Немає збігів у загальних налаштуваннях.',
   'st.display.advanced': 'Розширені',
+  ...getApocalypseModeCopy('uk'),
+  ...getEmergencyBoxCopy('uk'),
+  'st.providers.webgpu_download.stopping': 'Зупинка й видалення файлів…',
+  'st.providers.webgpu_download.stop': 'Зупинити й видалити',
   'st.display.clarify_timeout.label': 'Таймаут уточнення',
   'st.display.clarify_timeout.desc': 'Скільки чекати відповіді на уточнювальне запитання, перш ніж автоматично обрати перший варіант (або зафіксувати таймаут без варіантів). 0 — миттєво (завжди автовибір). Понад 1200 с — чекати необмежено (Вимк.). За замовчуванням 60 с. Не застосовується до дозволів і підтверджень надсилання форм.',
   'st.display.clarify_timeout.off': 'Вимк.',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "Записати ваші дії як збережений робочий процес",
   "sp.slash.run_workflow": "Запустити збережений сценарій за ID",
   "sp.workflows.run_prompt": "Запустити збережений сценарій «{name}»",
+  "sp.workflows.standalone_unavailable": "Це окреме вікно працює лише в режимі «Запитати». Відкрийте WebBrain на бічній панелі, щоб запускати збережені сценарії в режимі «Діяти».",
   "sp.workflows.parameters_for": "Введіть параметри для «{name}». Значення використовуються лише для цього запуску.",
   "sp.workflows.parameter_required": "Поле «{name}» обов’язкове.",
   "sp.slash.save_workflow": "Зберегти останній успішний записаний запуск",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "Замінити зашифровану хмарну копію на поточні налаштування WebBrain цього пристрою?",
   "st.sync.consent.legacy": "Увімкнути зашифровану синхронізацію? WebBrain передасть наскрізну зашифровану копію ваших спогадів, автозаповнення профілю та налаштувань постачальника ключа API до WebBrain Cloud. Історія чату та вхід OAuth не синхронізуються.",
   "st.sync.consent.denied": "Дозвіл на зашифровану синхронізацію не надано.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

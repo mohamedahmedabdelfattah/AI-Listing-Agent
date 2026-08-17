@@ -1,7 +1,18 @@
 // Arabic (ar).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'فتح مربع حوار الطباعة الأصلي للصفحة الحالية',
+  'sp.print.error': 'تعذر فتح مربع حوار الطباعة: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'انقطع بث الاستجابة؛ تتم إعادة محاولة دور Ask هذا بدون بث.',
   'sp.providers.no_setup_group': 'لا يتطلب إعدادًا',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': 'اللغة',
   'sp.btn.settings': 'الإعدادات',
   "sp.btn.clear": "محادثة جديدة",
+  'sp.btn.expand': 'فتح في نافذة جديدة',
   'sp.btn.send': 'إرسال',
   'sp.chat.follow_response': 'متابعة الإجابة',
   'sp.chat.jump_latest': 'الانتقال إلى الأحدث',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': 'يتضمّن الاستخدام اليومي المجاني لـ WebBrain Cloud. تمر الطلبات عبر api.webbrain.one؛ افتراضيًا نسجّل البيانات الوصفية للحصة وتصحيح الأخطاء، وليس نص المطالبات أو محتوى الصفحة أو لقطات الشاشة أو ردود النموذج. {privacyLink}. لمزيد من الاستخدام، اشترك عبر {subscribeLink}. أدِر الفوترة عبر {accountLink}.',
   'st.providers.webbrain_note.privacy_link': 'سياسة الخصوصية',
   'st.providers.test': 'اختبار الاتصال',
+  'st.providers.duplicate': 'نسخ',
+  'st.providers.duplicate_limit': 'يُسمح بنسخة واحدة فقط',
+  'st.providers.duplicate_unavailable': 'لا يمكن نسخ مزود الخدمة هذا',
+  'st.providers.duplicate_inactive': 'احفظ مزود الخدمة هذا قبل نسخه',
+  'st.providers.remove_duplicate': 'حذف النسخة',
+  'st.providers.remove_duplicate_confirm': 'هل تريد حذف نسخة مزود الخدمة هذه وإعداداتها المحفوظة؟',
   'st.providers.set_active': 'تعيينه نشطًا',
   'st.providers.active': 'نشط',
   'st.providers.saved': 'تم الحفظ!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': 'تم مسح المسودة.',
   'sp.scratchpad.error': 'منطقة المسودة غير متاحة: {msg}',
   'sp.perm.verb.schedule': 'جدولة عمل مستقبلي لـ',
+  'sp.perm.verb.window': 'تغيير حجم نافذة المتصفح على',
   'tool.schedule_resume': 'جدولة استئناف',
   'tool.schedule_task': 'جدولة مهمة',
   'st.display.scheduled_tasks.label': 'المهام المجدوَلة',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': 'البحث في الإعدادات العامة',
   'st.display.search.empty': 'لا توجد إعدادات عامة مطابقة.',
   'st.display.advanced': 'متقدم',
+  ...getApocalypseModeCopy('ar'),
+  ...getEmergencyBoxCopy('ar'),
+  'st.providers.webgpu_download.stopping': 'جارٍ الإيقاف وحذف الملفات…',
+  'st.providers.webgpu_download.stop': 'إيقاف وحذف',
   'st.display.clarify_timeout.label': 'مهلة التوضيح',
   'st.display.clarify_timeout.desc': 'مدة انتظار الرد على سؤال التوضيح قبل اختيار الخيار الأول تلقائيًا (أو انتهاء المهلة إن لم توجد خيارات). 0 = فوري (اختيار تلقائي دائمًا). أعلى من 1200 ثانية = انتظار بلا حدود (إيقاف). الافتراضي 60 ثانية. لا ينطبق على أذونات أو تأكيدات إرسال النماذج.',
   'st.display.clarify_timeout.off': 'إيقاف',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "سجّل إجراءاتك كمسار عمل محفوظ",
   "sp.slash.run_workflow": "تشغيل سير عمل محفوظ حسب المعرّف",
   "sp.workflows.run_prompt": "تشغيل سير العمل المحفوظ «{name}»",
+  "sp.workflows.standalone_unavailable": "هذه النافذة المستقلة مخصصة لوضع السؤال فقط. افتح WebBrain في اللوحة الجانبية لتشغيل مهام سير العمل المحفوظة في وضع التنفيذ.",
   "sp.workflows.parameters_for": "أدخل معلمات «{name}». تُستخدم القيم لهذا التشغيل فقط.",
   "sp.workflows.parameter_required": "«{name}» مطلوب.",
   "sp.slash.save_workflow": "حفظ أحدث تشغيل مسجل وناجح",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "هل تريد استبدال النسخة السحابية المشفرة بإعداد WebBrain الحالي لهذا الجهاز؟",
   "st.sync.consent.legacy": "هل تريد تفعيل المزامنة المشفرة؟ سيرسل WebBrain نسخة مشفرة من طرف إلى طرف من ذكرياتك، والملء التلقائي لملفك الشخصي، وإعدادات موفر مفتاح واجهة برمجة التطبيقات (API) إلى WebBrain Cloud. لا تتم مزامنة سجل الدردشة وتسجيلات الدخول عبر OAuth.",
   "st.sync.consent.denied": "لم يتم منح إذن المزامنة المشفرة.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

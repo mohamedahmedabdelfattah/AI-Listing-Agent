@@ -21,7 +21,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'get_accessibility_tree',
-      description: 'PREFERRED page-reading tool. Returns the page as a flat, indented text representation of its accessibility tree. Each kept node is one line of the form `role "accessible name" [ref_id] href="..." type="..." checked=true|false placeholder="..."`. Indentation shows hierarchy. ref_ids are STABLE across calls — re-use them in click_ax / type_ax / set_checked. Native checkbox/radio state is reported as checked=true|false. NEVER enumerate sibling or generic ref_ids one-by-one: ref_id is only for one targeted subtree you already know matters. If the result is truncated (`truncated:true`, `hasMore:true`), call again with the exact returned `continuationArgs`; it preserves filter, depth, size, and `page:nextPage`. Before answering a whole-page or whole-thread question, continue until `hasMore:false`. Once the needed field/button is visible for an ordinary UI task, act on it instead of reading more. Oversized trees AUTO-SLICE and return structured continuation metadata instead of an unparseable clipped result. Results may also include a structured `pageGate` when a rendered login, registration, or subscription surface blocks article access; blocking dialogs are scoped to the visible gate while retaining ref_ids for its controls. Use this first; read_page is a prose fallback for long-form articles only.',
+      description: 'PREFERRED page-reading tool. Returns the page as a flat, indented text representation of its accessibility tree. Each kept node is one line of the form `role "accessible name" [ref_id] href="..." type="..." checked=true|false placeholder="..."`. Indentation shows hierarchy. ref_ids are STABLE across calls — re-use them in click_ax / type_ax / set_checked. Native checkbox/radio state is reported as checked=true|false. NEVER enumerate sibling or generic ref_ids one-by-one: ref_id is only for one targeted subtree you already know matters. If the result is truncated (`truncated:true`, `hasMore:true`), call again with the exact returned `continuationArgs`; it preserves filter, depth, size, and `page:nextPage`. For a complete Gmail thread, first discover the trusted `conversationRootRefId`, then read that ref_id subtree with `filter:"all"`, `maxDepth:15`, and every exact continuation until `hasMore:false`; never paginate the Gmail document root into unrelated inbox rows. `conversationExpansionState:"expanded"` separately confirms Gmail exposed the whole conversation. Before answering any other whole-page or whole-thread question, continue until `hasMore:false`. Once the needed field/button is visible for an ordinary UI task, act on it instead of reading more. Oversized trees AUTO-SLICE and return structured continuation metadata instead of an unparseable clipped result. Results may also include a structured `pageGate` when a rendered login, registration, or subscription surface blocks article access; blocking dialogs are scoped to the visible gate while retaining ref_ids for its controls. Use this first; read_page is a prose fallback for long-form articles only.',
       parameters: {
         type: 'object',
         properties: {
@@ -30,6 +30,7 @@ export const AGENT_TOOLS = [
           maxChars: { type: 'number', maximum: STANDARD_TREE_PAGE_CHARS, description: 'Maximum pageContent characters per structured page (default and maximum 6000). Capable non-Compact providers with at least 64k context advertise a 12000 maximum for whole-thread or whole-document reads. Larger trees return continuationArgs for the next page.' },
           ref_id: { type: 'string', description: 'Optional. Anchor the read at a previously-seen ref_id instead of document.body — returns just that element and its subtree. Useful for zooming into a nav, table, or dialog you already found.' },
           page: { type: 'number', description: 'Optional 1-based chunk number for any tree filter. When a result returns hasMore:true, reuse the exact continuationArgs so filter, maxDepth, and maxChars remain stable.' },
+          tree_revision: { type: 'string', description: 'Opaque tree snapshot revision returned inside continuationArgs for page 2 and later. Omit it when starting or restarting page 1; otherwise never invent or modify it and reuse the exact continuationArgs.' },
         },
         required: [],
       },
@@ -374,7 +375,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'go_back',
-      description: 'Go back one entry in the current tab\'s session history, like the browser Back button. Use this for "go back" / "return to the previous page" rather than trying to run history.back() yourself (page scripts are CSP-blocked on many sites). Returns {success, url} on success, or {success:false, error} when there is no earlier entry or the page is internal (the URL is verified to actually change). Leaving a page with unsaved changes is blocked unless force:true.',
+      description: 'Go back one entry in the current tab\'s session history, like the browser Back button. Use this for "go back" / "return to the previous page" rather than trying to run history.back() yourself (page scripts are CSP-blocked on many sites). Returns {success, url} on success, or {success:false, error} when there is no earlier entry or the page is internal. Movement is verified from browser history events or a changed URL, including SPA entries whose URL stays identical. Leaving a page with unsaved changes is blocked unless force:true.',
       parameters: {
         type: 'object',
         properties: {
@@ -388,7 +389,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'go_forward',
-      description: 'Go forward one entry in the current tab\'s session history, like the browser Forward button — reverses a previous go_back. Returns {success, url} on success, or {success:false, error} when there is no later entry or the page is internal. Leaving a page with unsaved changes is blocked unless force:true.',
+      description: 'Go forward one entry in the current tab\'s session history, like the browser Forward button — reverses a previous go_back. Returns {success, url} on success, or {success:false, error} when there is no later entry or the page is internal. Movement is verified from browser history events or a changed URL, including SPA entries whose URL stays identical. Leaving a page with unsaved changes is blocked unless force:true.',
       parameters: {
         type: 'object',
         properties: {
@@ -838,7 +839,7 @@ export const AGENT_TOOLS = [
           selector: { type: 'string', description: 'CSS selector for the element to click inside the iframe.' },
           matchIndex: { type: 'number', description: 'Zero-based element index from iframe_read. Omit only when the selector uniquely matches one element across the selected frames.' },
         },
-        required: ['selector'],
+        required: ['urlFilter', 'selector'],
       },
     },
   },
@@ -856,7 +857,7 @@ export const AGENT_TOOLS = [
           text: { type: 'string', description: 'Text to type into the field.' },
           clear: { type: 'boolean', description: 'Whether to clear the field before typing. Default false.' },
         },
-        required: ['selector', 'text'],
+        required: ['urlFilter', 'selector', 'text'],
       },
     },
   },
@@ -1640,7 +1641,7 @@ READING THE CURRENT TAB vs. FETCHING URLS — read this:
 - Exception for YouTube video-content questions: if an enabled skill exposes a transcript tool such as \`read_youtube_transcript\`, call it first. Purpose-built skill tools are not generic \`fetch_url\`. Do not ask for \`/allow-api\` before calling a skill tool; \`/allow-api\` only applies to mutating \`fetch_url\`/\`research_url\` API calls. Read-only skill tools can run in Ask mode; download-job skill tools require Act mode plus download permission.
 - DO NOT call \`fetch_url\` or \`research_url\` against the URL of the active tab, the API equivalent of the active tab, or a "renderable" / "raw" / "amp" / "mobile" variant of the active tab's URL. Re-fetching content the user is already looking at is the most common wasted step. Symptom of this antipattern: you fetch a Wikipedia/MediaWiki API URL for the same page the user is on, get a truncated result, then fetch a slightly different variant hoping for more content. Stop and call \`read_page\` instead.
 - \`fetch_url\` and \`research_url\` are for content on OTHER URLs — a referenced article, an API the page links to, a sibling page, a different site entirely.
-- If \`get_accessibility_tree\` returns \`truncated:true\` / \`hasMore:true\`, reuse its exact \`continuationArgs\`. For a whole-page, whole-document, or whole-thread request, continue until \`hasMore:false\` before answering; for an ordinary UI target, continue only until the target is found.
+- If \`get_accessibility_tree\` returns \`truncated:true\` / \`hasMore:true\`, reuse its exact \`continuationArgs\`. For a complete Gmail thread, first discover \`conversationRootRefId\`, then read that trusted subtree with \`filter:"all"\`, \`maxDepth:15\`, and exact continuations; never paginate the Gmail document root into unrelated inbox rows. For another whole-page, whole-document, or whole-thread request, continue until \`hasMore:false\` before answering; for an ordinary UI target, continue only until the target is found.
 - If \`read_page\` returns \`hasMore:true\`, continue deterministically with the exact returned \`continuationArgs\` (equivalent to \`{offset: nextOffset, limit: textLimit, includeChrome}\`) until enough article text is covered. Preserve every extraction option across windows; do not scroll and reread the same prefix. \`truncationReason:"tool_output_window"\` with \`accessState:"no_blocking_page_gate"\` is NOT a paywall or access restriction; only a structured blocking \`pageGate\` supports that claim.
 
 Guidelines:
@@ -1684,6 +1685,7 @@ ${PLAN_TO_EXECUTION_GUIDANCE}
 Available tools:
 - get_accessibility_tree: PREFERRED read. Flat-text tree of the page with roles, names, and stable ref_ids. Default starting point for almost every turn.
 - inspect_viewport: Read-only visual inspection when appearance or rendered pixels matter.
+- After visual inspection, act on a screenshot-derived point with click({x,y,from_screenshot:true}); WebBrain converts image pixels to CSS pixels mechanically.
 - click_ax: Click a node by its ref_id from the tree. Preferred over click({text/selector}).
 - set_checked: Idempotently set a native checkbox by ref_id and verify checkedBefore/checkedAfter. Use this instead of toggling with click_ax.
 - type_ax: Type into a node by its ref_id from the tree. Preferred over the click-then-type_text pattern.
@@ -1966,7 +1968,7 @@ TOOLS — use ONLY these:
 - inspect_viewport: Read-only visual inspection for ads, images, canvas, charts, and layout.
 - read_page: Prose fallback for articles.
 - get_window_info: Read window/viewport size.
-- scroll: Scroll up/down.
+- scroll({direction:"up"|"down"|"top"|"bottom"}): Scroll the page or active pane. Use scroll({direction:"down"}) to scroll down; do not invent scrolldown/scrollup tools.
 - extract_data: Get tables, headings, images.
 - click_ax({ref_id}): Click by ref_id from the tree. PREFERRED.
 - set_checked({ref_id, checked}): Idempotently set and verify a native checkbox. Never toggle checkboxes repeatedly with click_ax.
@@ -2044,6 +2046,7 @@ ${PLAN_TO_EXECUTION_GUIDANCE}
 TOOLS — use only these:
 - get_accessibility_tree: PREFERRED read. Flat-text tree with roles, names, and stable ref_ids. Use filter:"visible" by default.
 - inspect_viewport: Read-only visual inspection for ads, images, canvas, charts, and layout.
+- After inspect_viewport, act on a screenshot-derived point with click({x,y,from_screenshot:true}); WebBrain converts image pixels to CSS pixels mechanically.
 - click_ax({ref_id}) / set_checked({ref_id, checked}) / type_ax({ref_id, text}) / set_field({ref_id, text, submit}): act on nodes by ref_id. set_field is preferred for text fields; set_checked is required for native checkboxes.
 - read_page: prose fallback for long articles. get_window_info: inspect browser window/viewport size. scroll, navigate({url}), go_back()/go_forward(): walk the run tab's history. new_tab({url}) only opens a background reference tab and never retargets the run; promote_iframe({urlFilter}) navigates the current run to one child frame's standalone URL.
 - get_interactive_elements: legacy indexed element list (use when the tree misses elements). click({text}) / type_text({text}) / press_keys({key}): legacy fallbacks. press_keys supports only unmodified Escape/Tab/Enter/arrows or ; (semicolon), never Ctrl/Cmd/Alt/Shift combinations or browser shortcuts.

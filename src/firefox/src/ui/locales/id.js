@@ -1,7 +1,18 @@
 // Indonesian (id).
 import chromeWebStoreLocale from './chrome-web-store.mjs';
 
+import { getApocalypseModeCopy } from './apocalypse-copy.mjs';
+import { getEmergencyBoxCopy } from './emergency-copy.mjs';
+
 export default {
+  'sp.message_info.sent': 'sent {time}',
+  'sp.message_info.speed': '{rate} tok/sec',
+  'sp.message_info.tokens': '{count} tokens',
+  'sp.message_info.duration': '{seconds}s',
+  'sp.message_info.finish': 'Stop reason: {reason}',
+  'sp.message_info.hint': 'Click to show message info',
+  'sp.slash.print': 'Buka dialog cetak bawaan halaman saat ini',
+  'sp.print.error': 'Tidak dapat membuka dialog cetak: {msg}',
   ...chromeWebStoreLocale,
   'sp.streaming.fallback': 'Streaming respons terputus; mencoba kembali giliran Ask ini tanpa streaming.',
   'sp.providers.no_setup_group': 'Tanpa penyiapan',
@@ -113,6 +124,7 @@ export default {
   'sp.btn.language': 'Bahasa',
   'sp.btn.settings': 'Pengaturan',
   "sp.btn.clear": "Percakapan baru",
+  'sp.btn.expand': 'Buka di jendela baru',
   'sp.btn.send': 'Kirim',
   'sp.chat.follow_response': 'Ikuti jawaban',
   'sp.chat.jump_latest': 'Ke bagian terbaru',
@@ -253,6 +265,12 @@ export default {
   'st.providers.webbrain_note.body': 'Penggunaan harian gratis WebBrain Cloud sudah termasuk. Permintaan melewati api.webbrain.one; secara default kami mencatat metadata untuk kuota dan debugging, bukan teks prompt, konten halaman, tangkapan layar, atau respons model. {privacyLink}. Untuk penggunaan lebih, berlangganan di {subscribeLink}. Kelola penagihan di {accountLink}.',
   'st.providers.webbrain_note.privacy_link': 'Kebijakan privasi',
   'st.providers.test': 'Uji koneksi',
+  'st.providers.duplicate': 'Duplikat',
+  'st.providers.duplicate_limit': 'Hanya satu duplikat yang diizinkan',
+  'st.providers.duplicate_unavailable': 'Penyedia ini tidak dapat diduplikasi',
+  'st.providers.duplicate_inactive': 'Simpan penyedia ini sebelum menduplikasinya',
+  'st.providers.remove_duplicate': 'Hapus duplikat',
+  'st.providers.remove_duplicate_confirm': 'Hapus penyedia duplikat ini beserta konfigurasi tersimpannya?',
   'st.providers.set_active': 'Jadikan aktif',
   'st.providers.active': 'AKTIF',
   'st.providers.saved': 'Tersimpan!',
@@ -570,6 +588,7 @@ export default {
   'sp.scratchpad.cleared': 'Bak pasir dikosongkan.',
   'sp.scratchpad.error': 'Bak pasir tidak tersedia: {msg}',
   'sp.perm.verb.schedule': 'menjadwalkan pekerjaan mendatang untuk',
+  'sp.perm.verb.window': 'mengubah ukuran jendela browser di',
   'tool.schedule_resume': 'Menjadwalkan lanjutan',
   'tool.schedule_task': 'Menjadwalkan tugas',
   'st.display.scheduled_tasks.label': 'Tugas terjadwal',
@@ -662,6 +681,10 @@ export default {
   'st.display.search.placeholder': 'Cari pengaturan Umum',
   'st.display.search.empty': 'Tidak ada pengaturan Umum yang cocok.',
   'st.display.advanced': 'Lanjutan',
+  ...getApocalypseModeCopy('id'),
+  ...getEmergencyBoxCopy('id'),
+  'st.providers.webgpu_download.stopping': 'Menghentikan dan menghapus file…',
+  'st.providers.webgpu_download.stop': 'Hentikan & hapus',
   'st.display.clarify_timeout.label': 'Batas waktu klarifikasi',
   'st.display.clarify_timeout.desc': 'Berapa lama menunggu balasan pada prompt klarifikasi sebelum memilih opsi pertama secara otomatis (atau timeout jika tidak ada opsi). 0 = Instan (selalu pilih otomatis). Di atas 1200 detik menunggu tanpa batas (Nonaktif). Default 60 detik. Tidak berlaku untuk izin atau konfirmasi kirim formulir.',
   'st.display.clarify_timeout.off': 'Nonaktif',
@@ -783,6 +806,7 @@ export default {
   "sp.slash.teach": "Rekam tindakan Anda sebagai alur kerja tersimpan",
   "sp.slash.run_workflow": "Jalankan alur kerja tersimpan berdasarkan ID",
   "sp.workflows.run_prompt": "Jalankan alur kerja tersimpan “{name}”",
+  "sp.workflows.standalone_unavailable": "Jendela mandiri ini hanya untuk mode Tanya. Buka WebBrain di panel samping untuk menjalankan alur kerja tersimpan dalam mode Bertindak.",
   "sp.workflows.parameters_for": "Masukkan parameter untuk “{name}”. Nilai hanya digunakan untuk proses ini.",
   "sp.workflows.parameter_required": "“{name}” wajib diisi.",
   "sp.slash.save_workflow": "Simpan proses terekam terbaru yang berhasil",
@@ -996,4 +1020,5 @@ export default {
   "st.sync.confirm.reset": "Ganti salinan cloud terenkripsi dengan pengaturan WebBrain perangkat ini saat ini?",
   "st.sync.consent.legacy": "Aktifkan sinkronisasi terenkripsi? WebBrain akan mengirimkan salinan memori Anda yang terenkripsi ujung ke ujung, pengisian otomatis profil, dan pengaturan penyedia kunci API ke WebBrain Cloud. Riwayat obrolan dan proses masuk OAuth tidak disinkronkan.",
   "st.sync.consent.denied": "Izin sinkronisasi terenkripsi tidak diberikan.",
+  'st.providers.webgpu_note.body': '{modelLink} runs entirely in Chrome with no API endpoint. The first generation downloads about 4.85 GB and caches it in the browser. Test Connection checks the packaged runtime and hardware adapter without downloading the model.',
 };

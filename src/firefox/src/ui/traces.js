@@ -26,6 +26,7 @@ let compareMode = false;
 let compareIds = []; // length 0..2
 let timelineObjectUrls = new Set();
 let traceRenderRequestId = 0;
+let traceRefreshRequestId = 0;
 
 // conversationId → [runs, oldest first]. Rebuilt from allRuns on every refresh.
 let conversationMap = new Map();
@@ -64,7 +65,10 @@ function formatCost(value) {
 // ----- List -----------------------------------------------------------------
 
 async function refresh() {
-  allRuns = await listRuns({ limit: 500 });
+  const requestId = ++traceRefreshRequestId;
+  const runs = await listRuns({ limit: 500 });
+  if (requestId !== traceRefreshRequestId) return;
+  allRuns = runs;
   rebuildConversationMap();
   countPill.textContent = t(allRuns.length === 1 ? 'tr.run' : 'tr.runs', { n: allRuns.length });
   // Populate model filter.
@@ -289,6 +293,11 @@ function renderEvent(ev, shotCache, compact, objectUrls = new Set()) {
         Number.isFinite(ev.data?.imageBlockCount) ? `${ev.data.imageBlockCount} img` : '',
         Number.isFinite(ev.data?.documentBlockCount) ? `${ev.data.documentBlockCount} doc` : '',
       ].filter(Boolean).join(' · ');
+      const rag = ev.data?.localWikipediaRag;
+      const ragDates = (Array.isArray(rag?.archiveDates) ? rag.archiveDates : []).slice(0, 3).join(', ');
+      const ragDetails = rag
+        ? ` · Wikipedia RAG: ${rag.status || (rag.attempted ? 'attempted' : 'skipped')}${rag.attempted ? ` · ${Number(rag.matchCount) || 0} match${Number(rag.matchCount) === 1 ? '' : 'es'}` : ''}${ragDates ? ` · ${ragDates}` : ''}`
+        : '';
       return `
         <div class="event llm_request">
           <div class="event-head"><span class="kind">${escapeHtml(t('tr.event.llm_request'))}</span>${stepBadge}<span class="latency">${ts}</span></div>
@@ -296,7 +305,7 @@ function renderEvent(ev, shotCache, compact, objectUrls = new Set()) {
             m: ev.data?.messageCount || 0,
             t: ev.data?.toolsCount || 0,
             model: ev.data?.model || '',
-          }))}${media ? ` · ${escapeHtml(media)}` : ''}</span>
+          }))}${media ? ` · ${escapeHtml(media)}` : ''}${escapeHtml(ragDetails)}</span>
         </div>`;
     }
     case 'llm_response': {
@@ -397,6 +406,14 @@ function renderEvent(ev, shotCache, compact, objectUrls = new Set()) {
     }
     case 'note':
     default: {
+      if (ev.data?.note === 'standalone_wikipedia_search_requested') {
+        const queries = Math.max(1, Number(ev.data?.extra?.queryCount) || 1);
+        return `
+          <div class="event note">
+            <div class="event-head"><span class="kind">Local Wikipedia retrieval</span>${stepBadge}<span class="latency">${ts}</span></div>
+            <span class="tool-args">On-device model request · ${queries} ${queries === 1 ? 'query' : 'queries'} · no network access</span>
+          </div>`;
+      }
       return `
         <div class="event note">
           <div class="event-head"><span class="kind">${escapeHtml(ev.kind)}</span>${stepBadge}<span class="latency">${ts}</span></div>

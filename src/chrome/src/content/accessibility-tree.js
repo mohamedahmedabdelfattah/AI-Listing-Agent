@@ -74,6 +74,7 @@
       // element with the same local traversal number.
       window.__wbElementMap = Object.create(null);
       window.__wbRefCounter = 0;
+      window.__wbAxTreeSnapshots = new Map();
       window.__wbAxRefScope = { pageUrl, id: mintRefScopeId() };
     }
     return window.__wbAxRefScope;
@@ -484,6 +485,61 @@
     return false;
   }
 
+  function composedParent(node) {
+    if (!node) return null;
+    if (node.assignedSlot) return node.assignedSlot;
+    const parent = node.parentNode;
+    if (parent) {
+      return (typeof ShadowRoot !== 'undefined' && parent instanceof ShadowRoot)
+        ? parent.host
+        : parent;
+    }
+    const root = node.getRootNode?.();
+    return (typeof ShadowRoot !== 'undefined' && root instanceof ShadowRoot)
+      ? root.host
+      : null;
+  }
+
+  function deepestOpenShadowHit(x, y) {
+    let hit = document.elementFromPoint(x, y);
+    const seen = new Set();
+    while (hit?.shadowRoot?.mode === 'open' && !seen.has(hit)) {
+      seen.add(hit);
+      const inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  }
+
+  function visualTargetEligibility(el) {
+    const tag = el.tagName?.toLowerCase() || '';
+    if (tag === 'button') return 'semantic-button';
+    if (['canvas', 'iframe', 'label', 'input', 'textarea', 'select'].includes(tag)) {
+      return 'coordinate-only';
+    }
+    return isInteractive(el) ? 'coordinate-only' : '';
+  }
+
+  function resolveVisualTargetAtPoint(x, y) {
+    const cssX = Number(x);
+    const cssY = Number(y);
+    if (!Number.isFinite(cssX) || !Number.isFinite(cssY)) return null;
+
+    for (let el = deepestOpenShadowHit(cssX, cssY); el; el = composedParent(el)) {
+      if (el.nodeType !== Node.ELEMENT_NODE) continue;
+      const eligibility = visualTargetEligibility(el);
+      if (!eligibility) continue;
+      return {
+        ref_id: getOrMintRef(el),
+        role: getRole(el),
+        name: (getAccessibleName(el) || '').slice(0, 160),
+        eligibility,
+      };
+    }
+    return null;
+  }
+
   function isLandmark(el) {
     if (LANDMARK_TAGS.has(el.tagName.toLowerCase())) return true;
     return el.getAttribute('role') !== null;
@@ -860,32 +916,225 @@
     };
   }
 
-  function detectGmailConversationExpansionState() {
-    if (window.location.hostname !== 'mail.google.com') return null;
+  function fingerprintTreeContent(output) {
+    let hash = 0xcbf29ce484222325n;
+    for (let index = 0; index < output.length; index += 1) {
+      hash ^= BigInt(output.charCodeAt(index));
+      hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+    }
+    return `fnv1a64:${hash.toString(16).padStart(16, '0')}`;
+  }
+
+  const MAX_TREE_SNAPSHOTS = 3;
+
+  function treeSnapshotKey(scope, treeRevision) {
+    return JSON.stringify([
+      String(scope?.filter || 'all'),
+      Number(scope?.maxDepth),
+      Number(scope?.maxChars),
+      String(scope?.ref_id || ''),
+      String(treeRevision || ''),
+    ]);
+  }
+
+  function findTreeSnapshot(scope, treeRevision) {
+    if (!(window.__wbAxTreeSnapshots instanceof Map) || !treeRevision) return null;
+    const key = treeSnapshotKey(scope, treeRevision);
+    const snapshot = window.__wbAxTreeSnapshots.get(key) || null;
+    if (snapshot && !snapshotActionsAreCurrent(snapshot)) {
+      window.__wbAxTreeSnapshots.delete(key);
+      return null;
+    }
+    return snapshot;
+  }
+
+  function actionableTreeSnapshotSignatures(lines) {
+    const signatures = [];
+    const seen = new Set();
+    for (const line of lines) {
+      const match = String(line || '').match(/\[(ref_\d+)\]/);
+      const refId = match?.[1];
+      if (!refId || seen.has(refId)) continue;
+      seen.add(refId);
+      const el = window.__wbElementMap[refId]?.deref?.();
+      if (!el || !el.isConnected || !isInteractive(el)) continue;
+      signatures.push([refId, formatLine(el, 0)]);
+    }
+    return signatures;
+  }
+
+  function snapshotActionsAreCurrent(snapshot) {
+    if (!Array.isArray(snapshot?.actionSignatures)) return false;
+    for (const [refId, signature] of snapshot.actionSignatures) {
+      const el = window.__wbElementMap[refId]?.deref?.();
+      if (!el || !el.isConnected || !isInteractive(el) || formatLine(el, 0) !== signature) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function rememberTreeSnapshot(scope, treeRevision, output, lines) {
+    if (!treeRevision || !scope?.ref_id) return;
+    if (!(window.__wbAxTreeSnapshots instanceof Map)) window.__wbAxTreeSnapshots = new Map();
+    const key = treeSnapshotKey(scope, treeRevision);
+    window.__wbAxTreeSnapshots.delete(key);
+    window.__wbAxTreeSnapshots.set(key, {
+      output,
+      lines: lines.slice(),
+      treeRevision,
+      actionSignatures: actionableTreeSnapshotSignatures(lines),
+    });
+    while (window.__wbAxTreeSnapshots.size > MAX_TREE_SNAPSHOTS) {
+      window.__wbAxTreeSnapshots.delete(window.__wbAxTreeSnapshots.keys().next().value);
+    }
+  }
+
+  function isGmailThreadIdentifier(value) {
+    const segment = String(value || '').split('?')[0];
+    return /^FMfc[A-Za-z0-9_-]+$/.test(segment) || /^[a-f0-9]{12,}$/i.test(segment);
+  }
+
+  function isGmailConversationHash(hash) {
+    const segments = String(hash || '').replace(/^#/, '').split('/').filter(Boolean);
+    const route = String(segments[0] || '').toLowerCase();
+    const threadId = segments.at(-1);
+    if (!isGmailThreadIdentifier(threadId)) return false;
+    if (route === 'label') {
+      // Label names may contain slashes and may themselves look like legacy
+      // hexadecimal thread IDs. Only Gmail's unambiguous modern ID prefix can
+      // terminate a variable-depth label conversation route.
+      return segments.length >= 3 && /^FMfc[A-Za-z0-9_-]+$/.test(threadId);
+    }
+    if (route === 'search' || route === 'category') return segments.length === 3;
+    return segments.length === 2;
+  }
+
+  function isGmailConversationRoute() {
+    if (window.location.hostname !== 'mail.google.com') return false;
+    return isGmailConversationHash(window.location.hash);
+  }
+
+  function detectGmailConversationRoot() {
+    if (!isGmailConversationRoute()) return null;
+    const candidates = [];
+    try {
+      for (const candidate of document.querySelectorAll('main,[role="main"]')) {
+        // Message HTML is untrusted and may contain arbitrary landmarks. A
+        // nested fake main must never become trusted whole-thread coverage.
+        if (candidate.closest('[role="listitem"],[role="article"],.adn,.ads')) continue;
+        if (!isVisible(candidate)) continue;
+        const gmailMessageCount = candidate.querySelectorAll('.adn,.ads').length;
+        // Inbox, search, label, and category result lists also expose semantic
+        // listitems. Fail closed unless Gmail message containers prove that
+        // this landmark is the active conversation.
+        if (!gmailMessageCount) continue;
+        const semanticMessageCount = candidate.querySelectorAll('[role="article"],[role="listitem"]').length;
+        const hasEditor = !!candidate.querySelector('textarea,[contenteditable]:not([contenteditable="false"]),[role="textbox"]');
+        const hasHeading = !!candidate.querySelector('h1,h2,h3,[role="heading"]');
+        const rect = candidate.getBoundingClientRect();
+        const visibleArea = Math.max(0, rect.width) * Math.max(0, rect.height);
+        const score = (gmailMessageCount * 1000000)
+          + (hasEditor ? 100000 : 0)
+          + (semanticMessageCount * 1000)
+          + (hasHeading ? 100 : 0)
+          + Math.min(99, Math.round(visibleArea / 10000));
+        candidates.push({ candidate, score });
+      }
+    } catch (e) {}
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0]?.candidate || null;
+  }
+
+  function gmailConversationExpansionControlState(control) {
+    // Gmail's accessible label is localized, but these semantic jsname values
+    // remain stable across UI languages. Keep the English names as a fallback
+    // for older/alternate Gmail markup that does not expose jsname.
+    const jsname = String(control?.getAttribute?.('jsname') || '').trim();
+    if (jsname === 'xvWlrc') return 'expanded';
+    if (jsname === 'tRarif') return 'collapsed';
+    const name = String(getAccessibleName(control) || '').replace(/\s+/g, ' ').trim();
+    if (name === 'Collapse all') return 'expanded';
+    if (name === 'Expand all') return 'collapsed';
+    return null;
+  }
+
+  function detectGmailConversationExpansionState(conversationRoot) {
+    if (!isGmailConversationRoute() || !conversationRoot) return null;
     let collapsed = false;
     try {
-      for (const control of document.querySelectorAll('button,[role="button"]')) {
+      for (const control of conversationRoot.querySelectorAll('button,[role="button"]')) {
         if (!isVisible(control)) continue;
         // Message bodies are untrusted page data and may contain arbitrary
         // buttons. Only Gmail chrome outside message/article containers can
         // provide the structured expansion evidence used by the agent guard.
         if (control.closest('[role="listitem"],[role="article"],.adn,.ads')) continue;
-        const name = String(getAccessibleName(control) || '').replace(/\s+/g, ' ').trim();
-        if (name === 'Collapse all') return 'expanded';
-        if (name === 'Expand all') collapsed = true;
+        const state = gmailConversationExpansionControlState(control);
+        if (state === 'expanded') return state;
+        if (state === 'collapsed') collapsed = true;
       }
     } catch (e) {}
     return collapsed ? 'collapsed' : null;
   }
 
-  function generateAccessibilityTree(filter, maxDepth, maxChars, refId, page) {
+  function findGmailConversationExpandAll(conversationRoot) {
+    if (!isGmailConversationRoute() || !conversationRoot) return null;
+    try {
+      for (const control of conversationRoot.querySelectorAll('button,[role="button"]')) {
+        if (!isVisible(control)) continue;
+        // Only Gmail chrome outside untrusted message bodies may be invoked.
+        // This deliberately cannot turn an Ask-mode read into a general click.
+        if (control.closest('[role="listitem"],[role="article"],.adn,.ads')) continue;
+        if (gmailConversationExpansionControlState(control) === 'collapsed') return control;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  async function expandGmailConversationForRead(refId, timeoutMs) {
+    try {
+      ensureRefScope();
+      const conversationRoot = detectGmailConversationRoot();
+      if (!conversationRoot || getOrMintRef(conversationRoot) !== refId) {
+        return { attempted: false, expanded: false };
+      }
+      if (detectGmailConversationExpansionState(conversationRoot) === 'expanded') {
+        return { attempted: false, expanded: true };
+      }
+      const control = findGmailConversationExpandAll(conversationRoot);
+      if (!control) return { attempted: false, expanded: false };
+
+      control.click();
+      const timeout = Math.min(4000, Math.max(250, Number(timeoutMs) || 2500));
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeout) {
+        if (detectGmailConversationExpansionState(conversationRoot) === 'expanded') {
+          return { attempted: true, expanded: true };
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      return {
+        attempted: true,
+        expanded: detectGmailConversationExpansionState(conversationRoot) === 'expanded',
+      };
+    } catch (e) {
+      return { attempted: false, expanded: false };
+    }
+  }
+
+  function generateAccessibilityTree(filter, maxDepth, maxChars, refId, page, expectedTreeRevision) {
     try {
       ensureRefScope();
       const effFilter = filter || 'all';
-      const conversationExpansionState = refId ? null : detectGmailConversationExpansionState();
-      const conversationMetadata = conversationExpansionState
-        ? { conversationExpansionState }
-        : {};
+      const conversationRoot = detectGmailConversationRoot();
+      const conversationRootRefId = conversationRoot ? getOrMintRef(conversationRoot) : '';
+      const conversationExpansionState = conversationRoot
+        ? detectGmailConversationExpansionState(conversationRoot)
+        : null;
+      const conversationMetadata = {
+        ...(conversationRootRefId ? { conversationRootRefId } : {}),
+        ...(conversationExpansionState ? { conversationExpansionState } : {}),
+      };
       // Bound every default tree, including `all`. The model-facing tool
       // result is capped separately at 8k chars by default; leaving `all`
       // unlimited made that later generic limiter chop serialized JSON and
@@ -902,13 +1151,20 @@
         refId: refId || null,
       };
       const effMaxChars = maxChars != null ? maxChars : defaultChars;
-      const continuationBase = {
+      const baseTreeScope = {
         filter: effFilter,
         maxDepth: opts.maxDepth,
         maxChars: effMaxChars,
         ...(refId ? { ref_id: refId } : {}),
       };
+      const gmailSnapshotEligible = !!refId
+        && !!conversationRootRefId
+        && refId === conversationRootRefId
+        && effFilter === 'all'
+        && Number(opts.maxDepth) >= 15;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const requestedPage = Math.max(1, Math.floor(Number(page) || 1));
+      const requestedTreeRevision = String(expectedTreeRevision || '').trim();
       const lines = [];
 
       if (refId) {
@@ -921,13 +1177,34 @@
           };
         }
         const el = weak.deref();
-        if (!el) {
+        if (!el || !el.isConnected) {
           delete window.__wbElementMap[refId];
           return {
-            error: `Element with ref_id '${refId}' no longer exists. It may have been removed from the page. Call get_accessibility_tree without ref_id to get the current page state.`,
+            error: `Element with ref_id '${refId}' is no longer connected to the page. Call get_accessibility_tree without ref_id to get the current page state.`,
             pageContent: '',
             viewport,
           };
+        }
+        if (gmailSnapshotEligible && requestedPage > 1 && requestedTreeRevision) {
+          const snapshot = findTreeSnapshot(baseTreeScope, requestedTreeRevision);
+          if (snapshot) {
+            const continuationBase = {
+              ...baseTreeScope,
+              tree_revision: snapshot.treeRevision,
+            };
+            return {
+              ...sliceTreePage(
+                snapshot.output,
+                snapshot.lines,
+                effMaxChars,
+                requestedPage,
+                continuationBase,
+              ),
+              viewport,
+              treeRevision: snapshot.treeRevision,
+              ...conversationMetadata,
+            };
+          }
         }
         walk(el, 0, opts, lines);
       } else if (document.body) {
@@ -1024,8 +1301,42 @@
       sweepDeadRefs();
 
       const output = lines.join('\n');
+      const treeRevision = fingerprintTreeContent(output);
+      const revisionBound = !!refId;
+      const continuationBase = {
+        ...baseTreeScope,
+        ...(revisionBound ? { tree_revision: treeRevision } : {}),
+      };
+      if (gmailSnapshotEligible && (
+        requestedPage === 1
+        || !requestedTreeRevision
+        || requestedTreeRevision === treeRevision
+      )) {
+        rememberTreeSnapshot(baseTreeScope, treeRevision, output, lines);
+      }
+      if (revisionBound && requestedPage > 1
+          && requestedTreeRevision && requestedTreeRevision !== treeRevision) {
+        const restartArgs = {
+          ...baseTreeScope,
+          page: 1,
+        };
+        return {
+          error: 'The anchored accessibility snapshot changed or expired. Restart from page 1 with the exact returned continuationArgs.',
+          pageContent: '',
+          viewport,
+          treeRevision,
+          treeRevisionMismatch: true,
+          truncated: true,
+          hasMore: true,
+          page: requestedPage,
+          nextPage: 1,
+          continuationArgs: restartArgs,
+          restartArgs,
+          ...conversationMetadata,
+        };
+      }
       if (effMaxChars != null && page != null && Math.floor(Number(page) || 1) > 1) {
-        return { ...sliceTreePage(output, lines, effMaxChars, page, continuationBase), viewport, ...conversationMetadata };
+        return { ...sliceTreePage(output, lines, effMaxChars, page, continuationBase), viewport, treeRevision, ...conversationMetadata };
       }
       // For 'visible' / 'interactive', truncate gracefully on overflow —
       // small models prefer a partial tree to a hard error. For 'all'
@@ -1040,7 +1351,7 @@
       //      empty (chunkSize too small).
       if (effMaxChars != null && output.length > effMaxChars) {
         if (filter && filter !== 'all' && maxChars == null) {
-          return { ...sliceTreePage(output, lines, effMaxChars, page, continuationBase), viewport, ...conversationMetadata };
+          return { ...sliceTreePage(output, lines, effMaxChars, page, continuationBase), viewport, treeRevision, ...conversationMetadata };
         }
         const sliced = sliceTreePage(output, lines, effMaxChars, page, continuationBase);
         if (sliced.pageContent && !sliced.pageContent.startsWith('[tree page')) {
@@ -1051,6 +1362,7 @@
           return {
             ...sliced,
             viewport,
+            treeRevision,
             autoDegraded: true,
             notice: hint,
             ...conversationMetadata,
@@ -1067,7 +1379,7 @@
         return { error: hint, pageContent: '', viewport };
       }
 
-      return { pageContent: output, viewport, ...conversationMetadata };
+      return { pageContent: output, viewport, treeRevision, ...conversationMetadata };
     } catch (e) {
       return {
         error: 'Error generating accessibility tree: ' + (e && e.message || 'Unknown error'),
@@ -1166,9 +1478,11 @@
 
   window.__generateAccessibilityTree = generateAccessibilityTree;
   window.__generateAccessibilitySubtree = generateAccessibilitySubtree;
+  window.__wb_expand_gmail_conversation_for_read = expandGmailConversationForRead;
   window.__wb_ax_lookup = lookup;
   window.__wb_ax_ref = getOrMintRef;
   window.__wb_ax_name = getAccessibleName;
   window.__wb_ax_role = getRole;
+  window.__wb_ax_resolve_visual_target = resolveVisualTargetAtPoint;
   window.__wb_ax_suggest = suggestNearRefs;
 })();
