@@ -36,5 +36,15 @@
     ["src/chrome/src/ui/listings.html", "src/firefox/src/ui/listings.html"],
     ["src/chrome/src/ui/listings.js", "src/firefox/src/ui/listings.js"]
   ],
-  "touchpoints": []
+  "touchpoints": [
+    {
+      "file": "package.json",
+      "mustContain": [
+        "test/listing-agent-contract.test.mjs",
+        "test/listing-agent/run.mjs",
+        "npm run test:contract",
+        "npm run test:listing-agent"
+      ]
+    }
+  ]
 }
