@@ -1,0 +1,50 @@
+{
+  "description": "Owned-paths + merge-safety contract for the AI Listing Agent fork. Feature plans append touchpoints as they wire upstream files.",
+  "ownedPaths": [
+    "src/chrome/src/agent/listing-agent/mission.js",
+    "src/chrome/src/agent/listing-agent/filter-planner.js",
+    "src/chrome/src/agent/listing-agent/detection.js",
+    "src/chrome/src/agent/listing-agent/extraction.js",
+    "src/chrome/src/agent/listing-agent/evidence.js",
+    "src/chrome/src/agent/listing-agent/requirements.js",
+    "src/chrome/src/agent/listing-agent/ranking.js",
+    "src/chrome/src/agent/listing-agent/dedup.js",
+    "src/chrome/src/agent/listing-agent/progress.js",
+    "src/chrome/src/agent/listing-agent/controller.js",
+    "src/chrome/src/agent/listing-agent/research-skill.js",
+    "src/chrome/src/agent/listing-agent/export.js",
+    "src/chrome/src/agent/listing-agent/persistence.js",
+    "src/chrome/src/ui/research-command.js",
+    "src/chrome/src/ui/listings.html",
+    "src/chrome/src/ui/listings.js"
+  ],
+  "mirroredPairs": [
+    ["src/chrome/src/agent/listing-agent/mission.js", "src/firefox/src/agent/listing-agent/mission.js"],
+    ["src/chrome/src/agent/listing-agent/filter-planner.js", "src/firefox/src/agent/listing-agent/filter-planner.js"],
+    ["src/chrome/src/agent/listing-agent/detection.js", "src/firefox/src/agent/listing-agent/detection.js"],
+    ["src/chrome/src/agent/listing-agent/extraction.js", "src/firefox/src/agent/listing-agent/extraction.js"],
+    ["src/chrome/src/agent/listing-agent/evidence.js", "src/firefox/src/agent/listing-agent/evidence.js"],
+    ["src/chrome/src/agent/listing-agent/requirements.js", "src/firefox/src/agent/listing-agent/requirements.js"],
+    ["src/chrome/src/agent/listing-agent/ranking.js", "src/firefox/src/agent/listing-agent/ranking.js"],
+    ["src/chrome/src/agent/listing-agent/dedup.js", "src/firefox/src/agent/listing-agent/dedup.js"],
+    ["src/chrome/src/agent/listing-agent/progress.js", "src/firefox/src/agent/listing-agent/progress.js"],
+    ["src/chrome/src/agent/listing-agent/controller.js", "src/firefox/src/agent/listing-agent/controller.js"],
+    ["src/chrome/src/agent/listing-agent/research-skill.js", "src/firefox/src/agent/listing-agent/research-skill.js"],
+    ["src/chrome/src/agent/listing-agent/export.js", "src/firefox/src/agent/listing-agent/export.js"],
+    ["src/chrome/src/agent/listing-agent/persistence.js", "src/firefox/src/agent/listing-agent/persistence.js"],
+    ["src/chrome/src/ui/research-command.js", "src/firefox/src/ui/research-command.js"],
+    ["src/chrome/src/ui/listings.html", "src/firefox/src/ui/listings.html"],
+    ["src/chrome/src/ui/listings.js", "src/firefox/src/ui/listings.js"]
+  ],
+  "touchpoints": [
+    {
+      "file": "package.json",
+      "mustContain": [
+        "test/listing-agent-contract.test.mjs",
+        "test/listing-agent/run.mjs",
+        "npm run test:contract",
+        "npm run test:listing-agent"
+      ]
+    }
+  ]
+}
