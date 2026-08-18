@@ -6,7 +6,7 @@
 import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations } from './i18n.js';
 import { CAPABILITY_LABEL } from '../agent/permission-gate.js';
 import { sanitizeMarkdownLinks } from './markdown-link.js';
-import { codeFenceLanguage, highlightCode, renderMarkdownHeadings } from './markdown-render.js';
+import { codeFenceLanguage, highlightCode, renderMarkdownHeadings, renderMarkdownTables } from './markdown-render.js';
 import { applyMode, loadMode, watch } from './theme.js';
 import { buildRecommendedActions, shouldShowRecommendedActions } from './recommended-actions.js';
 import { createContextMenuPromptHandler } from './context-menu-prompts.js';
@@ -29,6 +29,14 @@ import { runUiUnavailableBeforeSeq } from '../run-ui-journal.js';
 import { formatErrorMessage } from '../error-format.js';
 import { buildMessageInfoPills } from '../message-info.js';
 import { escapeHtml } from './utils.js';
+import {
+  buildSelectionComposerDraft,
+  selectionIsQuoteable,
+  selectionRangeIsVisible,
+  selectionRangeRect,
+  selectionTextFromRange,
+} from './selection-quote.js';
+import { getSelectionShortcutLocalization } from '../selection-shortcut-i18n.js';
 import {
   isBackgroundConnectionError,
   runDetachedWithReconnect,
@@ -535,6 +543,7 @@ const selectionScopeBannerEl = document.getElementById('selection-scope-banner')
 const selectionScopeTitleEl = document.getElementById('selection-scope-title');
 const selectionScopeDescriptionEl = document.getElementById('selection-scope-description');
 const selectionScopeNewConversationBtn = document.getElementById('selection-scope-new-conversation');
+let selectionAskActionEl = document.getElementById('selection-ask-action');
 const historyBtn = document.getElementById('btn-history');
 const expandBtn = document.getElementById('btn-expand');
 const settingsBtn = document.getElementById('btn-settings');
@@ -589,6 +598,11 @@ const ASK_PLACEHOLDER_KEYS = [
   'sp.input.placeholder_tip.record',
 ];
 const PERMISSION_REMINDER_PLACEHOLDER_KEY = 'sp.input.placeholder_tip.skip_permissions';
+let pendingAnswerSelection = null;
+let selectionAskActionRefreshFrame = null;
+let selectionAskActionRefreshTimer = null;
+let selectionAskActionLocale = '';
+let selectionAskActionLabel = '';
 const SLASH_COMMANDS = [
   { value: '/help', usage: '/help', descriptionKey: 'sp.slash.help', action: 'show', outOfBand: true },
   {
@@ -2252,6 +2266,7 @@ function drainQueuedComposerMessageForCurrentTab() {
 }
 
 async function renderClearedConversationForTab(tabId) {
+  dismissSelectionAskAction();
   setSelectionGroundedForTab(tabId, false);
   const clearResult = await clearCachedTabChat(tabId);
   if (!clearResult?.ok || clearResult?.skipped) {
@@ -4208,6 +4223,7 @@ if (verboseBtn) {
 
 async function switchToTab(newTabId) {
   if (newTabId === currentTabId && renderedTabId === newTabId) { return; }
+  dismissSelectionAskAction();
   if (newConversationConfirmationState
       && !sameTabId(newConversationConfirmationState.tabId, newTabId)) {
     settleNewConversationConfirmation(false, { restoreFocus: false });
@@ -7854,6 +7870,7 @@ async function sendMessage(extraChatParams = {}) {
       ...(retryOptions ? { __retry: { ...retryOptions, mode: 'ask' } } : {}),
     };
   }
+  dismissSelectionAskAction();
   const retryOptions = extraChatParams?.__retry || null;
   const modeOverride = ['ask', 'act', 'dev'].includes(extraChatParams?.__mode) ? extraChatParams.__mode : null;
   const onContextMenuClaimRejected = typeof extraChatParams?.__onContextMenuClaimRejected === 'function'
@@ -10621,6 +10638,11 @@ function messageInfoClickIsInteractive(target) {
   );
 }
 
+function messageInfoClickHasTextSelection() {
+  const selection = globalThis.getSelection?.();
+  return Boolean(selection && !selection.isCollapsed);
+}
+
 function toggleMessageInfo(msgEl) {
   const open = msgEl.classList.toggle('message-info-open');
   ensureMessageInfoElements(msgEl).toggle.setAttribute('aria-expanded', String(open));
@@ -10641,6 +10663,7 @@ function bindMessageInfoToggle(msgEl) {
   toggle.addEventListener('click', () => toggleMessageInfo(msgEl));
   msgEl.addEventListener('click', (event) => {
     if (messageInfoClickIsInteractive(event.target)) return;
+    if (messageInfoClickHasTextSelection()) return;
     toggleMessageInfo(msgEl);
   });
 }
@@ -10676,6 +10699,173 @@ function refreshOpenMessageInfoRows() {
     ensureMessageInfoElements(msgEl);
     if (msgEl.classList.contains('message-info-open')) renderMessageInfo(msgEl);
   });
+}
+
+function assistantAnswerElementForSelectionNode(node) {
+  let element = node?.nodeType === 1 ? node : node?.parentElement;
+  const viaClosest = element?.closest?.('.message.assistant') || null;
+  if (viaClosest) return viaClosest;
+  while (element) {
+    if (element.matches?.('.message.assistant')) return element;
+    element = element.parentElement || element.getRootNode?.()?.host || null;
+  }
+  return null;
+}
+
+function selectedAssistantAnswer() {
+  const selection = window.getSelection?.();
+  if (!selection || selection.rangeCount < 1 || selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0);
+  if (!range.startContainer.isConnected || !range.endContainer.isConnected) return null;
+  const startTextElement = assistantAnswerElementForSelectionNode(range.startContainer);
+  const endTextElement = assistantAnswerElementForSelectionNode(range.endContainer);
+  const text = selectionTextFromRange(range) || String(range.toString?.() || '').trim();
+  if (!selectionIsQuoteable({ startTextElement, endTextElement, text })) return null;
+  return { range, text };
+}
+
+function ensureSelectionAskActionEl() {
+  if (!selectionAskActionEl?.isConnected) {
+    selectionAskActionEl = document.getElementById('selection-ask-action');
+  }
+  if (!selectionAskActionEl) {
+    selectionAskActionEl = document.createElement('button');
+    selectionAskActionEl.id = 'selection-ask-action';
+    selectionAskActionEl.className = 'selection-ask-action hidden';
+    selectionAskActionEl.type = 'button';
+  }
+  if (selectionAskActionEl.parentElement !== document.body) {
+    document.body.appendChild(selectionAskActionEl);
+  }
+  return selectionAskActionEl;
+}
+
+function dismissSelectionAskAction() {
+  if (selectionAskActionRefreshTimer != null) {
+    clearTimeout(selectionAskActionRefreshTimer);
+    selectionAskActionRefreshTimer = null;
+  }
+  if (selectionAskActionRefreshFrame != null) {
+    cancelAnimationFrame(selectionAskActionRefreshFrame);
+    selectionAskActionRefreshFrame = null;
+  }
+  pendingAnswerSelection = null;
+  selectionAskActionEl?.classList.add('hidden');
+}
+
+function positionSelectionAskAction(range) {
+  if (!selectionAskActionEl) return;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const actionRect = selectionAskActionEl.getBoundingClientRect();
+  const actionWidth = actionRect.width || 180;
+  const actionHeight = actionRect.height || 32;
+  const inputTop = inputArea?.getBoundingClientRect().top;
+  const floor = Math.min(vh, Number.isFinite(inputTop) ? inputTop : vh) - 8;
+  const gap = 6;
+  const rect = range ? selectionRangeRect(range) : null;
+  const usable = rect && selectionRangeIsVisible(rect, { width: vw, height: vh });
+  const left = Math.min(
+    Math.max(8, usable ? rect.left : (vw - actionWidth) / 2),
+    Math.max(8, vw - actionWidth - 8),
+  );
+  const belowTop = usable ? rect.bottom + gap : floor - actionHeight;
+  const preferredTop = usable && belowTop + actionHeight <= floor
+    ? belowTop
+    : Math.max(8, usable ? rect.top - actionHeight - gap : floor - actionHeight);
+  const top = Math.min(Math.max(8, floor - actionHeight), preferredTop);
+  selectionAskActionEl.style.left = `${left}px`;
+  selectionAskActionEl.style.top = `${top}px`;
+}
+
+function applySelectionAskActionLabel() {
+  if (!selectionAskActionEl) return;
+  const locale = getLocale();
+  if (selectionAskActionLocale === locale && selectionAskActionLabel
+      && selectionAskActionEl.textContent === selectionAskActionLabel) {
+    return;
+  }
+  selectionAskActionLocale = locale;
+  selectionAskActionLabel = getSelectionShortcutLocalization(locale).strings.askQuestion;
+  selectionAskActionEl.textContent = selectionAskActionLabel;
+  selectionAskActionEl.title = selectionAskActionLabel;
+  selectionAskActionEl.setAttribute('aria-label', selectionAskActionLabel);
+}
+
+function refreshSelectionAskAction() {
+  const selected = selectedAssistantAnswer();
+  if (selected) {
+    showSelectionAskAction(selected);
+    return;
+  }
+  dismissSelectionAskAction();
+}
+
+function showSelectionAskAction(selected) {
+  if (!selected?.text || !ensureSelectionAskActionEl()) return;
+  pendingAnswerSelection = {
+    text: selected.text,
+    range: typeof selected.range?.cloneRange === 'function'
+      ? selected.range.cloneRange()
+      : selected.range,
+  };
+  applySelectionAskActionLabel();
+  selectionAskActionEl.classList.remove('hidden');
+  positionSelectionAskAction(pendingAnswerSelection.range);
+}
+
+function scheduleSelectionAskActionRefresh() {
+  if (selectionAskActionRefreshTimer != null) clearTimeout(selectionAskActionRefreshTimer);
+  if (selectionAskActionRefreshFrame != null) {
+    cancelAnimationFrame(selectionAskActionRefreshFrame);
+    selectionAskActionRefreshFrame = null;
+  }
+  selectionAskActionRefreshTimer = setTimeout(() => {
+    selectionAskActionRefreshTimer = null;
+    refreshSelectionAskAction();
+  }, 60);
+}
+
+function handleSelectionAskPointerDown(event) {
+  if (selectionAskActionEl?.contains(event.target)) return;
+  dismissSelectionAskAction();
+}
+
+function handleSelectionAskPointerUp() {
+  const selected = selectedAssistantAnswer();
+  if (selected) {
+    showSelectionAskAction(selected);
+    return;
+  }
+  requestAnimationFrame(() => {
+    const next = selectedAssistantAnswer();
+    if (next) showSelectionAskAction(next);
+    else scheduleSelectionAskActionRefresh();
+  });
+}
+
+function handleSelectionAskScroll() {
+  scheduleSelectionAskActionRefresh();
+}
+
+function askAboutSelectedAnswer() {
+  const liveSelection = selectedAssistantAnswer();
+  const selection = liveSelection || pendingAnswerSelection;
+  if (!selection?.text) {
+    dismissSelectionAskAction();
+    return;
+  }
+  const nextDraft = buildSelectionComposerDraft(selection.text, inputEl.value);
+  if (nextDraft === inputEl.value) {
+    dismissSelectionAskAction();
+    return;
+  }
+  inputEl.value = nextDraft;
+  dismissSelectionAskAction();
+  window.getSelection?.()?.removeAllRanges();
+  handleInput();
+  inputEl.focus();
+  inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
 }
 
 function addMessage(role, content, options = {}) {
@@ -11357,9 +11547,12 @@ function formatMarkdown(text, options = {}) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // 4. Block headings, inline formatting, markdown link sanitization, then
-  // newline → <br>. Code and inline-code placeholders were extracted above,
-  // so Markdown-looking source inside them is not interpreted here.
+  // 4. Tables, then headings, inline formatting, markdown link sanitization,
+  // then newline → <br>. Headings swallow their trailing newline, so tables
+  // must run first or a table on the next line is glued onto the heading.
+  // Code and inline-code placeholders were extracted above, so
+  // Markdown-looking source inside them is not interpreted here.
+  text = renderMarkdownTables(text);
   text = renderMarkdownHeadings(text);
   text = text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -11677,6 +11870,11 @@ async function handleGlobalKeydown(e) {
   if (e.key === 'Escape') {
     const slashMenuOpen = !!slashCommandMenuEl && !slashCommandMenuEl.classList.contains('hidden');
     if (slashMenuOpen) return;
+    if (selectionAskActionEl && !selectionAskActionEl.classList.contains('hidden')) {
+      e.preventDefault();
+      dismissSelectionAskAction();
+      return;
+    }
     if (isProcessing) {
       e.preventDefault();
       abortRun();
@@ -12683,6 +12881,33 @@ if (attachBtn && fileAttachInput) {
 
 // --- Event Listeners ---
 
+ensureSelectionAskActionEl();
+if (selectionAskActionEl) {
+  if (selectionAskActionEl.parentElement !== document.body) {
+    document.body.appendChild(selectionAskActionEl);
+  }
+  selectionAskActionEl.addEventListener('mousedown', (event) => event.preventDefault());
+  selectionAskActionEl.addEventListener('click', (event) => {
+    event.stopPropagation();
+    askAboutSelectedAnswer();
+  });
+  document.addEventListener('selectionchange', scheduleSelectionAskActionRefresh);
+  document.addEventListener('pointerdown', handleSelectionAskPointerDown, true);
+  document.addEventListener('pointerup', handleSelectionAskPointerUp, true);
+  document.addEventListener('pointercancel', handleSelectionAskPointerUp, true);
+  document.addEventListener('mouseup', handleSelectionAskPointerUp, true);
+  window.addEventListener('pointerup', handleSelectionAskPointerUp, true);
+  window.addEventListener('pointercancel', handleSelectionAskPointerUp, true);
+  document.addEventListener('keyup', scheduleSelectionAskActionRefresh);
+  chatContainerEl?.addEventListener('scroll', handleSelectionAskScroll, { passive: true });
+  window.addEventListener('resize', dismissSelectionAskAction);
+  document.addEventListener('wb-locale-changed', () => {
+    selectionAskActionLocale = '';
+    applySelectionAskActionLabel();
+    scheduleSelectionAskActionRefresh();
+  });
+}
+
 sendBtn.addEventListener('click', sendMessage);
 
 document.addEventListener('keydown', handleGlobalKeydown, true);
@@ -12700,8 +12925,11 @@ queuedMessagesEl?.addEventListener('click', (e) => {
 });
 
 inputEl.addEventListener('keydown', (e) => {
+  // During an active IME composition, every keydown belongs to the input method,
+  // including the Enter that commits the composition rather than sending.
+  if (e.isComposing || e.keyCode === 229) return;
   if (handleSlashCommandKeydown(e)) return;
-  const isPlainArrow = !e.isComposing && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+  const isPlainArrow = !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
   if (isPlainArrow) {
     if (e.key === 'ArrowUp' && editLastQueuedComposerMessageForCurrentTab()) {
       e.preventDefault();
